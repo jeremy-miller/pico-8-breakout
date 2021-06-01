@@ -4,13 +4,18 @@ __lua__
 function _init()
  cls()
  mode="start"
+ levels={}
+ --levels[1]="x5b"
+ levels[1]="bxixhxexp"
+ levels[2]="b9/x9/b9/b9"
+ level_num=1
 end
-
-
+-->8
 function _update60()
 	if mode=="game" then update_game()
 	elseif mode=="start" then update_start()
 	elseif mode=="game_over" then update_game_over()
+	elseif mode=="level_over" then update_level_over()
 	end
 end
 
@@ -21,60 +26,142 @@ function update_game()
  if btn(⬅️) then
  	pad_dx=-2.5
  	button_pressed=true
+ 	if sticky then
+ 		ball_dx=-1
+ 	end
  end
  if btn(➡️) then
  	pad_dx=2.5
  	button_pressed=true
+ 	if sticky then
+ 		ball_dx=1
+ 	end
  end
  if not button_pressed then
  	-- slow down pad
  	pad_dx/=1.3
  end
  pad_x+=pad_dx
- 
+ -- make sure pad can't go offscreen
+ pad_x=mid(0,pad_x,127-pad_w)
+
  -- ball update
  local next_x,next_y -- ball x,y next frame
- 
- next_x=ball_x+ball_dx
- next_y=ball_y+ball_dy
- 
- -- check if ball collides with walls
- if next_x > 125 or next_x < 3 then
-  next_x=mid(0,next_x,127) -- make sure ball never leaves screen
-  ball_dx=-ball_dx
-  sfx(0)
- end
- if next_y < 9 then
-	 next_y=mid(0,next_y,127) -- make sure ball never leaves screen
-  ball_dy=-ball_dy
-  sfx(0)
- end
- 
- -- check if ball will collide with pad
- if ball_hit_box(next_x,next_y,pad_x,pad_y,pad_w,pad_h) then
- 	-- check if ball will collide with side of pad
-		if deflect_ball_horz(ball_x,ball_y,ball_dx,ball_dy,pad_x,pad_y,pad_w,pad_h) then
-			ball_dx=-ball_dx
-		else
-			ball_dy=-ball_dy
-		end
-		sfx(1)
-		points+=1
- end
- 
- ball_x=next_x
- ball_y=next_y
- 
- -- check if ball is out of bounds after its moved
- if next_y > 127 then
- 	sfx(2)
- 	lives-=1
- 	if lives<0 then
- 		game_over()
- 	else
-	 	serve_ball()
+ local brick_hit
+
+	-- check if player launched ball
+	if sticky and btnp(❎) then
+		sticky=false
+	end
+
+	if sticky then
+		ball_x=pad_x+flr(pad_w/2)
+	 ball_y=pad_y-ball_r-1
+	else
+		-- normal ball collision physics
+	 next_x=ball_x+ball_dx
+	 next_y=ball_y+ball_dy
+	
+	 -- check if ball collides with walls
+	 if next_x > 125 or next_x < 3 then
+	  next_x=mid(0,next_x,127) -- make sure ball never leaves screen
+	  ball_dx=-ball_dx
+	  sfx(0)
 	 end
- end
+	 if next_y < 9 then
+		 next_y=mid(0,next_y,127) -- make sure ball never leaves screen
+	  ball_dy=-ball_dy
+	  sfx(0)
+	 end
+	
+	 -- check if ball will collide with pad
+	 if ball_hit_box(next_x,next_y,pad_x,pad_y,pad_w,pad_h) then
+	 	-- check if ball will collide with side of pad
+			if deflect_ball_horz(ball_x,ball_y,ball_dx,ball_dy,pad_x,pad_y,pad_w,pad_h) then
+				-- ball hit paddle on side
+				ball_dx=-ball_dx
+				if ball_x < pad_x+pad_w/2 then
+					-- paddle collided with ball from right
+					-- reset ball to left of paddle
+					next_x=pad_x-ball_r
+				else
+					-- paddle collided with ball from left
+					-- reset ball to right of paddle
+					next_x=pad_x+pad_w+ball_r
+				end
+			else
+				-- ball hit paddle on top/bottom
+				ball_dy=-ball_dy
+				if ball_y > pad_y then
+					-- ball hit paddle from below
+					-- reset ball to below paddle
+					next_y=pad_y+pad_h+ball_r
+				else
+					-- ball hit paddle from above
+					-- reset ball to above paddle
+					next_y=pad_y-ball_r
+					if abs(pad_dx)>2 then
+						-- pad is moving fast enough to change angle
+						if sign(pad_dx)==sign(ball_dx) then
+							-- paddle is moving in same direction as ball
+							-- give low angle
+							set_ang(mid(0,ball_ang-1,2))
+						else
+							-- paddle is moving in opposite direction
+							-- give steeper angle
+							if ball_ang==2 then
+								-- change ball direction since we're already at steepest angle
+								ball_dx=-ball_dx
+							else
+								set_ang(mid(0,ball_ang+1,2))
+							end
+						end
+					end
+				end
+			end
+			sfx(1)
+			chain=1
+	 end
+	
+	 brick_hit=false
+	 for i=1,#brick_x do
+			-- check if ball will collide with brick
+		 if brick_vis[i] and ball_hit_box(next_x,next_y,brick_x[i],brick_y[i],brick_w,brick_h) then
+		 	if not brick_hit then
+			 	-- check if ball will collide with side of brick
+					if deflect_ball_horz(ball_x,ball_y,ball_dx,ball_dy,brick_x[i],brick_y[i],brick_w,brick_h) then
+						ball_dx=-ball_dx
+					else
+						ball_dy=-ball_dy
+					end
+				end
+				brick_hit=true
+				sfx(2+chain) -- sound effects go from 3-9
+				brick_vis[i]=false
+				points+=10*chain
+				chain+=1
+				chain=mid(1,chain,7) -- 7 is max combo multiplier
+				if level_finished() then
+					_draw() -- clear any remaining bricks from screen
+					level_over()
+				end
+		 end
+		end
+	
+	 ball_x=next_x
+	 ball_y=next_y
+	
+	 -- check if ball is out of bounds after its moved
+	 if next_y > 127 then
+	 	sfx(2)
+	 	lives-=1
+	 	if lives<0 then
+	 		game_over()
+	 	else
+		 	serve_ball()
+		 end
+	 end
+	end
 end
 
 
@@ -92,90 +179,82 @@ function ball_hit_box(next_ball_x,next_ball_y,box_x, box_y, box_w, box_h)
 end
 
 
+-- calculate wether to deflect the ball horizontally or not
 function deflect_ball_horz(ball_x,ball_y,ball_dx,ball_dy,target_x,target_y,target_w,target_h)
- -- calculate wether to deflect the ball
- -- horizontally or vertically when it hits a box
+ local slope = ball_dy/ball_dx  -- positive = up left, down right; negative = up right, down left
+ local dist_x, dist_y -- distance between ball and target corner
  if ball_dx == 0 then
-  -- moving vertically
+ 	-- moving vertically
   return false
  elseif ball_dy == 0 then
-  -- moving horizontally
+ 	-- moving horizontally
   return true
+ elseif slope > 0 and ball_dx > 0 then
+	 -- moving down right
+  dist_x = target_x - ball_x
+  dist_y = target_y - ball_y
+  return dist_x > 0 and dist_y/dist_x < slope
+ elseif slope < 0 and ball_dx > 0 then
+  -- moving up right
+  dist_x = target_x - ball_x
+  dist_y = target_y + target_h - ball_y
+  return dist_x > 0 and dist_y/dist_x >= slope
+ elseif slope > 0 and ball_dx < 0 then
+  -- moving up left
+  dist_x = target_x + target_w - ball_x
+  dist_y = target_y + target_h - ball_y
+  return dist_x < 0 and dist_y/dist_x <= slope
  else
-  -- moving diagonally
-  -- calculate slope
-  -- positive = up left, down right
-  -- negative = up right, down left
-  local slope = ball_dy / ball_dx
-  local dist_x, dist_y -- distance between ball and target corner
-  if slope > 0 and ball_dx > 0 then
-   -- moving down right
-   debug1="q1"
-   dist_x = target_x-ball_x
-   dist_y = target_y-ball_y
-   if dist_x<=0 then
-    return false
-   elseif dist_y/dist_x < slope then
-    return true
-   else
-    return false
-   end
-  elseif slope < 0 and ball_dx > 0 then
-   debug1="q2"
-   -- moving up right
-   dist_x = target_x-ball_x
-   dist_y = target_y+target_h-ball_y
-   if dist_x<=0 then
-    return false
-   elseif dist_y/dist_x < slope then
-    return false
-   else
-    return true
-   end
-  elseif slope > 0 and ball_dx < 0 then
-   debug1="q3"
-   -- moving left up
-   dist_x = target_x+target_w-ball_x
-   dist_y = target_y+target_h-ball_y
-   if dist_x>=0 then
-    return false
-   elseif dist_y/dist_x > slope then
-    return false
-   else
-    return true
-   end
-  else
-   -- moving left down
-   debug1="q4"
-   dist_x = target_x+target_w-ball_x
-   dist_y = target_y-ball_y
-   if dist_x>=0 then
-    return false
-   elseif dist_y/dist_x < slope then
-    return false
-   else
-    return true
-   end
-  end
+	 -- moving down left
+  dist_x = target_x + target_w - ball_x
+  dist_y = target_y - ball_y
+  return dist_x < 0 and dist_y/dist_x >= slope
  end
- return false
 end
 
 
-function game_over()
-	mode="game_over"
+-- determine the sign (pos/neg) of a given value
+function sign(n)
+	if n<0 then
+		return -1
+	elseif n>0 then
+		return 1
+	else
+		return 0
+	end
 end
+
+
+function set_ang(angle)
+	-- angles:
+	-- 0 = 0 < angle < 45
+	-- 1 = 45 degree
+	-- 2 = 45 < angle < 90
+	ball_ang=angle
+	-- preserve direction using sign()
+	if angle==2 then
+		ball_dx=0.5*sign(ball_dx)
+		ball_dy=1.3*sign(ball_dy)
+	elseif angle==0 then
+		ball_dx=1.3*sign(ball_dx)
+		ball_dy=0.5*sign(ball_dy)
+	else -- angle 1
+		ball_dx=1*sign(ball_dx)
+		ball_dy=1*sign(ball_dy)
+	end
+end
+
 
 function update_start()
-	if btn(❎) then
+	if btnp(❎) then
 		start_game()
-	end	
+	end
 end
 
 
 function start_game()
 	mode="game"
- 
+
  ball_r=2
  ball_clr=10
 
@@ -185,46 +264,202 @@ function start_game()
  pad_h=3
 	pad_dx=0
  pad_clr=7
- 
+
+ brick_x={}
+ brick_y={}
+ brick_vis={}
+ brick_type={}
+ brick_w=9
+ brick_h=4
+
+	level_num=1
+	level=levels[level_num]
+
+ build_bricks(level)
+
  lives=3
  points=0
- 
+	
+	sticky=true
+
+	chain=1 -- combo chain multiplier
+	
  serve_ball()
 end
 
 
+-- brick types:
+--  b = normal
+--  x = empty space
+--  i = indestructible
+--  h = hardened
+--  e = exploding
+--  p = powerup
+function build_bricks(lvl)
+	local j=0 -- used for tracking which row to add brick on
+	local last
+	for i=1,#lvl do
+		j+=1
+		char=sub(lvl,i,i)
+		if char=="b"
+		or char=="i"
+		or char=="h"
+		or char=="e"
+		or char=="p" then
+			last=char
+			add_brick(j,char)
+		elseif char=="x" then
+			last="x"
+		elseif char=="/" then
+			-- adjust j to next row
+			j=(flr((j-1)/11)+1)*11
+		elseif char>="1" and char<="9" then
+			for o=1,char+0 do -- add 0 to cast to int
+				if last=="b"
+				or last=="i"
+				or last=="h"
+				or last=="e"
+				or last=="p" then
+					add_brick(j,last)
+				elseif last=="x" then
+					-- don't add anything (space)
+				end
+				j+=1
+			end
+			j-=1 -- negate final j+=1
+		end
+	end
+end
+
+
+function add_brick(loc,typ)
+	-- 4 px padding from left of screen
+	-- loc-1 to start at 0 (since lua is 1-based index)
+	-- mod 11 (11 bricks per row) to figure out if new row (then start back at left)
+	-- add 1 px padding between bricks (but 2 since width + 1 for starting x location)
+	add(brick_x,4+((loc-1)%11)*(brick_w+2))
+	-- 20 px padding from top of screen
+	-- flr(loc/11) to figure out which row brick should be on
+	-- add 1 px padding between rows (but 2 since height + 1 for starting y location)
+	add(brick_y,20+flr((loc-1)/11)*(brick_h+2))
+	add(brick_vis,true)
+	add(brick_type,typ)
+end
+
+
 function serve_ball()
-	ball_x=3
- ball_y=33
+	ball_x=pad_x+flr(pad_w/2)
+ ball_y=pad_y-ball_r
  ball_dx=1
- ball_dy=1
+ ball_dy=-1
+ ball_ang=1
+ 
+ sticky=true
+ 
+ chain=1
+end
+
+
+function game_over()
+	mode="game_over"
+end
+
+
+function level_finished()
+	-- no bricks in level
+	if #brick_vis==0 then return true end
+
+	for i=1,#brick_vis do
+		if brick_vis[i] then
+			return false
+		end
+	end
+	return true
+end
+
+
+function level_over()
+	mode="level_over"
 end
 
 
 function update_game_over()
-	if btn(❎) then
+	if btnp(❎) then
 		start_game()
 	end
 end
 
 
+function update_level_over()
+	if btnp(❎) then
+		next_level()
+	end
+end
+
+
+function next_level()
+	mode="game"
+
+	pad_x=52
+ pad_y=120
+	pad_dx=0
+
+	level_num+=1
+	if level_num>#levels then
+		-- beat the game
+		mode="start"
+		return
+	end
+	level=levels[level_num]
+
+ build_bricks(level)
+	
+	sticky=true
+
+	chain=1
+	
+ serve_ball()
+end
+-->8
 function _draw()
 	if mode=="game" then draw_game()
 	elseif mode=="start" then draw_start()
 	elseif mode=="game_over" then draw_game_over()
+	elseif mode=="level_over" then draw_level_over()
 	end
 end
 
 
 function draw_game()
  cls(1) -- clear screen and set background color
- 
+
  circfill(ball_x,ball_y,ball_r,ball_clr)
  rectfill(pad_x,pad_y,pad_x+pad_w,pad_y+pad_h,pad_clr)
 
- rectfill(0,0,128,6,0) -- top bar
+	-- draw ball launch direction arrow
+	if sticky then
+		line(ball_x+ball_dx*3,ball_y+ball_dy*3,ball_x+ball_dx*5,ball_y+ball_dy*5,10)
+	end
+
+	-- draw bricks
+	local brick_clr
+	for i=1,#brick_x do
+		if brick_vis[i] then
+			if brick_type[i]=="b" then brick_clr=14
+			elseif brick_type[i]=="i" then brick_clr=5
+			elseif brick_type[i]=="h" then brick_clr=9
+			elseif brick_type[i]=="e" then brick_clr=8
+			elseif brick_type[i]=="p" then brick_clr=11
+			end
+			rectfill(brick_x[i],brick_y[i],brick_x[i]+brick_w,brick_y[i]+brick_h,brick_clr)
+		end
+	end
+
+	-- top bar
+ rectfill(0,0,128,6,0)
  print("lives:"..lives,1,1,7)
- print("points:"..points,40,1,7)
+ print("points:"..points,50,1,7)
+ print("chain:"..chain.."x",96,1,7)
 end
 
 
@@ -246,10 +481,19 @@ function draw_game_over()
 end
 
 
+function draw_level_over()
+	rectfill(0,60,128,75,0)
+	local text="stage clear"
+	print(text,hcenter(text),62,7)
+	text="press ❎ to continue"
+	print(text,hcenter(text),69,6)
+end
+
+
 function hcenter(text)
-	-- screen center minus
- --  (characters in text's width
- --   times width of a character)
+	-- screen center -
+ -- (characters in text's width
+ --  * width of a character)
  return 64-(#text*2)
 end
 __gfx__
@@ -263,3 +507,10 @@ __sfx__
 0001000018360183601834018320183101a3001730015300133001030010300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000100002436024360243402432024310000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000500001d3501c3501a350193501635014350123500f3500c3500835006350043500730005300042000f1000d100081000710000000000000000000000000000000000000000000000000000000000000000000
+000200002c36030360303503033033300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000200002d36031360313503133034300000000000037300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000200002e36032360323503233035300000000000037300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000200002f36033360333503333036300000000000037300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000200003036034360343503433037300000000000037300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000200003136035360353503533038300000000000037300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000200003236036360363503633039300000000000037300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
