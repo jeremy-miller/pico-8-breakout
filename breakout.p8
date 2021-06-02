@@ -5,9 +5,7 @@ function _init()
  cls()
  mode="start"
  levels={}
- --levels[1]="x5b"
- levels[1]="bxixhxexp"
- levels[2]="b9/x9/b9/b9"
+ levels[1]="b9b/x4p"
  level_num=1
 end
 -->8
@@ -136,20 +134,31 @@ function update_game()
 					end
 				end
 				brick_hit=true
-				sfx(2+chain) -- sound effects go from 3-9
-				brick_vis[i]=false
-				points+=10*chain
-				chain+=1
-				chain=mid(1,chain,7) -- 7 is max combo multiplier
-				if level_finished() then
-					_draw() -- clear any remaining bricks from screen
-					level_over()
-				end
+				hit_brick(i,true)
 		 end
+		end
+
+		-- move pills
+		for i=1,#pill_x do
+			if pill_vis[i] then
+				pill_y[i]+=0.7
+				if pill_y[i]>127 then
+					pill_vis[i]=false
+				elseif box_hit_box(pill_x[i],pill_y[i],8,6,pad_x,pad_y,pad_w,pad_h) then
+					pill_vis[i]=false
+				end
+			end
 		end
 	
 	 ball_x=next_x
 	 ball_y=next_y
+	 
+		check_explosions()
+		
+		if level_finished() then
+			_draw() -- clear any remaining bricks from screen
+			level_over()
+		end
 	
 	 -- check if ball is out of bounds after its moved
 	 if next_y > 127 then
@@ -165,7 +174,7 @@ function update_game()
 end
 
 
-function ball_hit_box(next_ball_x,next_ball_y,box_x, box_y, box_w, box_h)
+function ball_hit_box(next_ball_x,next_ball_y,box_x,box_y,box_w,box_h)
  -- top of ball lower than bottom of box
 	if next_ball_y-ball_r > box_y+box_h then return false
 	-- bottom of ball higher than top of box
@@ -174,6 +183,20 @@ function ball_hit_box(next_ball_x,next_ball_y,box_x, box_y, box_w, box_h)
 	elseif next_ball_x-ball_r > box_x+box_w then	return false
 	-- right of ball further left than left of box
  elseif next_ball_x+ball_r < box_x then	return false
+ end
+	return true
+end
+
+
+function box_hit_box(box1_x,box1_y,box1_w,box1_h,box2_x,box2_y,box2_w,box2_h)
+ -- top of box1 lower than bottom of box2
+	if box1_y > box2_y+box2_h then return false
+	-- bottom of box1 higher than top of box2
+	elseif box1_y+box1_h < box2_y then return false
+	-- left of box1 further right than right of box2
+	elseif box1_x > box2_x+box2_w then	return false
+	-- right of box1 further left than left of box2
+ elseif box1_x+box1_h < box2_x then	return false
  end
 	return true
 end
@@ -242,6 +265,104 @@ function set_ang(angle)
 		ball_dx=1*sign(ball_dx)
 		ball_dy=1*sign(ball_dy)
 	end
+end
+
+
+function hit_brick(loc,combo)
+	if brick_type[loc]=="b" then
+		sfx(2+chain) -- combo sound effects go from 3-9
+		brick_vis[loc]=false
+		points+=10*chain
+		if combo then
+			chain+=1
+			chain=mid(1,chain,7) -- 7 is max combo multiplier
+		end
+	elseif brick_type[loc]=="i" then
+		sfx(10)
+	elseif brick_type[loc]=="h" then
+		sfx(11)
+		-- needs to be hit twice
+		-- switch to normal brick
+		brick_type[loc]="b"		
+	elseif brick_type[loc]=="e" then
+		sfx(2+chain)
+		brick_type[loc]="zz" -- brick about to explode
+		points+=10*chain
+		if combo then
+			chain+=1
+			chain=mid(1,chain,7)
+		end
+	elseif brick_type[loc]=="p" then
+		sfx(2+chain)
+		brick_vis[loc]=false
+		points+=10*chain
+		if combo then
+			chain+=1
+			chain=mid(1,chain,7)
+		end
+		spawn_pill(brick_x[loc],brick_y[loc],1)
+	end
+end
+
+
+function spawn_pill(x,y,typ)
+	add(pill_x,x)
+	add(pill_y,y)
+	add(pill_vis,true)
+	add(pill_type,typ)
+end
+
+
+function check_explosions()
+	for i=1,#brick_x do
+		if brick_vis[i] and brick_type[i]=="zz" then
+			brick_type[i]="z"
+		end
+	end
+	
+	for i=1,#brick_x do
+		if brick_vis[i] and brick_type[i]=="z" then
+			explode_brick(i)
+		end
+	end
+	
+	for i=1,#brick_x do
+		if brick_vis[i] and brick_type[i]=="zz" then
+			brick_type[i]="z"
+		end
+	end
+end
+
+
+function explode_brick(loc)
+	brick_vis[loc]=false
+	for i=1,#brick_x do
+		if i!=loc -- not the exploding brick
+		and brick_vis[i]
+		and abs(brick_x[i]-brick_x[loc])<=(brick_w+2)
+		and abs(brick_y[i]-brick_y[loc])<=(brick_h+2)
+		then
+			hit_brick(i,false)
+		end
+	end
+end
+
+
+function level_finished()
+	-- no bricks in level
+	if #brick_vis==0 then return true end
+
+	for i=1,#brick_vis do
+		if brick_vis[i] and brick_type[i]!="i" then
+			return false
+		end
+	end
+	return true
+end
+
+
+function level_over()
+	mode="level_over"
 end
 
 
@@ -354,32 +475,24 @@ function serve_ball()
  ball_dy=-1
  ball_ang=1
  
+ reset_pills()
+ 
  sticky=true
  
  chain=1
 end
 
 
+function reset_pills()
+	pill_x={}
+	pill_y={}
+	pill_vis={}
+	pill_type={}
+end
+
+
 function game_over()
 	mode="game_over"
-end
-
-
-function level_finished()
-	-- no bricks in level
-	if #brick_vis==0 then return true end
-
-	for i=1,#brick_vis do
-		if brick_vis[i] then
-			return false
-		end
-	end
-	return true
-end
-
-
-function level_over()
-	mode="level_over"
 end
 
 
@@ -446,12 +559,20 @@ function draw_game()
 	for i=1,#brick_x do
 		if brick_vis[i] then
 			if brick_type[i]=="b" then brick_clr=14
-			elseif brick_type[i]=="i" then brick_clr=5
-			elseif brick_type[i]=="h" then brick_clr=9
-			elseif brick_type[i]=="e" then brick_clr=8
+			elseif brick_type[i]=="i" then brick_clr=6
+			elseif brick_type[i]=="h" then brick_clr=15
+			elseif brick_type[i]=="e" then brick_clr=9
+			elseif brick_type[i]=="z" then brick_clr=8 -- exploding brick about to explode
 			elseif brick_type[i]=="p" then brick_clr=11
 			end
 			rectfill(brick_x[i],brick_y[i],brick_x[i]+brick_w,brick_y[i]+brick_h,brick_clr)
+		end
+	end
+	
+	-- draw pills (powerups)
+	for i=1,#pill_x do
+		if pill_vis[i] then
+			spr(0,pill_x[i],pill_y[i])
 		end
 	end
 
@@ -497,12 +618,12 @@ function hcenter(text)
  return 64-(#text*2)
 end
 __gfx__
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00700700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00077000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00077000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00700700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+07777770000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+79994999000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+99949999000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+99994999000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+99949999000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+09999990000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __sfx__
 0001000018360183601834018320183101a3001730015300133001030010300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000100002436024360243402432024310000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -514,3 +635,5 @@ __sfx__
 000200003036034360343503433037300000000000037300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000200003136035360353503533038300000000000037300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000200003236036360363503633039300000000000037300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0002000021360213601c3001c30033300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000200002036024360243502433033300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
