@@ -5,7 +5,8 @@ function _init()
  cls()
  mode="start"
  levels={}
- levels[1]="p9p"
+ levels[1]="b9b/p9p"
+ levels[2]="bxbxbxbxb"
  level_num=1
  
  debug=""
@@ -22,20 +23,30 @@ end
 
 function update_game()
 	-- pad update
+	
+	-- update pad width from powerups
+	if powerup==3 then
+		-- expand powerup
+		pad_w=flr(pad_w_orig*1.5)
+	elseif powerup==4 then
+		-- reduce powerup
+		pad_w=flr(pad_w_orig/2)
+		point_mult=2
+	else
+		pad_w=pad_w_orig
+		point_mult=1
+	end
+	
 	local button_pressed=false
  if btn(⬅️) then
  	pad_dx=-2.5
  	button_pressed=true
- 	if sticky then
- 		ball_dx=-1
- 	end
+ 	point_stuck_balls(-1)
  end
  if btn(➡️) then
  	pad_dx=2.5
  	button_pressed=true
- 	if sticky then
- 		ball_dx=1
- 	end
+ 	point_stuck_balls(1)
  end
  if not button_pressed then
  	-- slow down pad
@@ -50,115 +61,13 @@ function update_game()
  local brick_hit
 
 	-- check if player launched ball
-	if sticky and btnp(❎) then
-		sticky=false
+	if btnp(❎) then
+		release_stuck_balls() 
 	end
 
-	if sticky then
-		ball_x=pad_x+flr(pad_w/2)
-	 ball_y=pad_y-ball_r-1
-	else
-		-- normal ball collision physics
-	 next_x=ball_x+ball_dx
-	 next_y=ball_y+ball_dy
-	
-	 -- check if ball collides with walls
-	 if next_x > 125 or next_x < 3 then
-	  next_x=mid(0,next_x,127) -- make sure ball never leaves screen
-	  ball_dx=-ball_dx
-	  sfx(0)
-	 end
-	 if next_y < 9 then
-		 next_y=mid(0,next_y,127) -- make sure ball never leaves screen
-	  ball_dy=-ball_dy
-	  sfx(0)
-	 end
-	
-	 -- check if ball will collide with pad
-	 if ball_hit_box(next_x,next_y,pad_x,pad_y,pad_w,pad_h) then
-	 	-- check if ball will collide with side of pad
-			if deflect_ball_horz(ball_x,ball_y,ball_dx,ball_dy,pad_x,pad_y,pad_w,pad_h) then
-				-- ball hit paddle on side
-				ball_dx=-ball_dx
-				if ball_x < pad_x+pad_w/2 then
-					-- paddle collided with ball from right
-					-- reset ball to left of paddle
-					next_x=pad_x-ball_r
-				else
-					-- paddle collided with ball from left
-					-- reset ball to right of paddle
-					next_x=pad_x+pad_w+ball_r
-				end
-			else
-				-- ball hit paddle on top/bottom
-				ball_dy=-ball_dy
-				if ball_y > pad_y then
-					-- ball hit paddle from below
-					-- reset ball to below paddle
-					next_y=pad_y+pad_h+ball_r
-				else
-					-- ball hit paddle from above
-					-- reset ball to above paddle
-					next_y=pad_y-ball_r
-					if abs(pad_dx)>2 then
-						-- pad is moving fast enough to change angle
-						if sign(pad_dx)==sign(ball_dx) then
-							-- paddle is moving in same direction as ball
-							-- give low angle
-							set_ang(mid(0,ball_ang-1,2))
-						else
-							-- paddle is moving in opposite direction
-							-- give steeper angle
-							if ball_ang==2 then
-								-- change ball direction since we're already at steepest angle
-								ball_dx=-ball_dx
-							else
-								set_ang(mid(0,ball_ang+1,2))
-							end
-						end
-					end
-				end
-			end
-			
-			sfx(1)
-			chain=1
-			
-			-- catch/sticky powerup
-			if powerup==2 then
-				sticky=true
-			end
-	 end
-	
-	 brick_hit=false
-	 for i=1,#brick_x do
-			-- check if ball will collide with brick
-		 if brick_vis[i] and ball_hit_box(next_x,next_y,brick_x[i],brick_y[i],brick_w,brick_h) then
-		 	if not brick_hit then
-			 	-- check if ball will collide with side of brick
-					if deflect_ball_horz(ball_x,ball_y,ball_dx,ball_dy,brick_x[i],brick_y[i],brick_w,brick_h) then
-						ball_dx=-ball_dx
-					else
-						ball_dy=-ball_dy
-					end
-				end
-				brick_hit=true
-				hit_brick(i,true)
-		 end
-		end
-	
-	 ball_x=next_x
-	 ball_y=next_y
-	
-	 -- check if ball is out of bounds after its moved
-	 if next_y > 127 then
-	 	sfx(2)
-	 	lives-=1
-	 	if lives<0 then
-	 		game_over()
-	 	else
-		 	serve_ball()
-		 end
-	 end
+	-- update balls
+	for i=#balls,1,-1 do
+		update_ball(i)
 	end
 	 
 	check_explosions()
@@ -169,7 +78,7 @@ function update_game()
 	end
 	
 	-- tick powerup timer
-	if powerup then
+	if powerup>=0 then
 		powerup_time-=1
 		if powerup_time<=0 then
 			powerup=-1
@@ -177,17 +86,144 @@ function update_game()
 	end
 
 	-- move pills and pick up powerups
-	for i=1,#pill_x do
-		if pill_vis[i] then
-			pill_y[i]+=0.7
-			if pill_y[i]>127 then
-				pill_vis[i]=false
-			elseif box_hit_box(pill_x[i],pill_y[i],8,6,pad_x,pad_y,pad_w,pad_h) then
-				pill_vis[i]=false
-				sfx(12)
-				get_powerup(pill_type[i])
-			end
+	for i=#pills,1,-1 do
+		pills[i].y+=0.7
+		if pills[i].y>127 then
+			del(pills,pills[i])
+		elseif box_hit_box(pills[i].x,pills[i].y,8,6,pad_x,pad_y,pad_w,pad_h) then
+			sfx(12)
+			get_powerup(pills[i].type)
+			del(pills,pills[i])
 		end
+	end
+end
+
+function update_ball(ball_idx)
+	b=balls[ball_idx]
+	if b.stuck then
+		-- ball stuck to pad
+		b.x=pad_x+sticky_x
+	 b.y=pad_y-ball_r-1
+	else
+		-- normal ball collision physics
+	 
+	 if powerup==0 then
+	 	-- slowdown
+	 	next_x=b.x+(b.dx/2)
+	 	next_y=b.y+(b.dy/2)
+	 else
+	  next_x=b.x+b.dx
+		 next_y=b.y+b.dy
+	 end
+	
+	 -- check if ball collides with walls
+	 if next_x > 125 or next_x < 3 then
+	  next_x=mid(3,next_x,125) -- make sure ball never leaves screen
+	  b.dx=-b.dx
+	  sfx(0)
+	 end
+	 if next_y < 9 then
+		 next_y=mid(9,next_y,127) -- make sure ball never leaves screen
+	  b.dy=-b.dy
+	  sfx(0)
+	 end
+	
+	 -- check if ball will collide with pad
+	 if ball_hit_box(next_x,next_y,pad_x,pad_y,pad_w,pad_h) then
+	 	-- check if ball will collide with side of pad
+			if deflect_ball_horz(b.x,b.y,b.dx,b.dy,pad_x,pad_y,pad_w,pad_h) then
+				-- ball hit paddle on side
+				b.dx=-b.dx
+				if b.x < pad_x+pad_w/2 then
+					-- paddle collided with ball from right
+					-- reset ball to left of paddle
+					next_x=pad_x-ball_r
+				else
+					-- paddle collided with ball from left
+					-- reset ball to right of paddle
+					next_x=pad_x+pad_w+ball_r
+				end
+			else
+				-- ball hit paddle on top/bottom
+				b.dy=-b.dy
+				if b.y > pad_y then
+					-- ball hit paddle from below
+					-- reset ball to below paddle
+					next_y=pad_y+pad_h+ball_r
+				else
+					-- ball hit paddle from above
+					-- reset ball to above paddle
+					next_y=pad_y-ball_r
+					if abs(pad_dx)>2 then
+						-- pad is moving fast enough to change angle
+						if sign(pad_dx)==sign(b.dx) then
+							-- paddle is moving in same direction as ball
+							-- give low angle
+							set_ang(b,mid(0,b.ang-1,2))
+						else
+							-- paddle is moving in opposite direction
+							-- give steeper angle
+							if b.ang==2 then
+								-- change ball direction since we're already at steepest angle
+								b.dx=-b.dx
+							else
+								set_ang(b,mid(0,b.ang+1,2))
+							end
+						end
+					end
+				end
+			end
+			
+			sfx(1)
+			chain=1
+			
+			-- catch/sticky powerup
+			if sticky and b.dy<0 then
+				release_stuck_balls()
+				sticky=false
+				b.stuck=true
+				sticky_x=b.x-pad_x
+			end
+	 end
+	
+	 brick_hit=false
+	 for i=1,#bricks do
+			-- check if ball will collide with brick
+		 if bricks[i].vis and ball_hit_box(next_x,next_y,bricks[i].x,bricks[i].y,brick_w,brick_h) then
+		 	if not brick_hit then
+			 	if (powerup==5 and bricks[i].type=="i") -- megaball and indestructible brick
+			 	or powerup!=5
+			 	then
+			 		-- check if ball will collide with side of brick
+						if deflect_ball_horz(b.x,b.y,b.dx,b.dy,bricks[i].x,bricks[i].y,brick_w,brick_h) then
+							b.dx=-b.dx
+						else
+							b.dy=-b.dy
+						end
+			 	end
+				end
+				brick_hit=true
+				hit_brick(i,true)
+		 end
+		end
+	
+	 b.x=next_x
+	 b.y=next_y
+	
+	 -- check if ball is out of bounds after its moved
+	 if next_y > 127 then
+	 	sfx(2)
+	 	if #balls>1 then
+	 		del(balls,b)
+	 	else
+	 		lives-=1
+		 	if lives<0 then
+		 		game_over()
+		 	else
+			 	serve_ball()
+			 end
+	 	end
+	 end
 	end
 end
 
@@ -266,127 +302,212 @@ function sign(n)
 end
 
 
-function set_ang(angle)
+function set_ang(ball,angle)
 	-- angles:
 	-- 0 = 0 < angle < 45
 	-- 1 = 45 degree
 	-- 2 = 45 < angle < 90
-	ball_ang=angle
+	ball.ang=angle
 	-- preserve direction using sign()
 	if angle==2 then
-		ball_dx=0.5*sign(ball_dx)
-		ball_dy=1.3*sign(ball_dy)
+		ball.dx=0.5*sign(ball.dx)
+		ball.dy=1.3*sign(ball.dy)
 	elseif angle==0 then
-		ball_dx=1.3*sign(ball_dx)
-		ball_dy=0.5*sign(ball_dy)
+		ball.dx=1.3*sign(ball.dx)
+		ball.dy=0.5*sign(ball.dy)
 	else -- angle 1
-		ball_dx=1*sign(ball_dx)
-		ball_dy=1*sign(ball_dy)
+		ball.dx=1*sign(ball.dx)
+		ball.dy=1*sign(ball.dy)
+	end
+end
+
+
+function release_stuck_balls()
+	for i=1,#balls do
+		if balls[i].stuck then
+			balls[i].x=mid(3,balls[i].x,125) -- make sure ball doesn't launch offscreen
+			balls[i].stuck=false
+		end
+	end
+end
+
+
+-- point balls stuck to pad in correct direction
+-- based on pad movement (input sign)
+function point_stuck_balls(sign)
+	for i=1,#balls do
+		if balls[i].stuck then
+			-- strip dx sign and use pad's sign instead
+			balls[i].dx=abs(balls[i].dx)*sign
+		end
 	end
 end
 
 
 function hit_brick(loc,combo)
-	if brick_type[loc]=="b" then
+	if bricks[loc].type=="b" then
 		sfx(2+chain) -- combo sound effects go from 3-9
-		brick_vis[loc]=false
-		points+=10*chain
+		bricks[loc].vis=false
+		points+=10*chain*point_mult
 		if combo then
 			chain+=1
 			chain=mid(1,chain,7) -- 7 is max combo multiplier
 		end
-	elseif brick_type[loc]=="i" then
+	elseif bricks[loc].type=="i" then
 		sfx(10)
-	elseif brick_type[loc]=="h" then
-		sfx(11)
-		-- needs to be hit twice
-		-- switch to normal brick
-		brick_type[loc]="b"		
-	elseif brick_type[loc]=="e" then
+	elseif bricks[loc].type=="h" then
+		if powerup==5 then -- megaball
+			sfx(2+chain) -- combo sound effects go from 3-9
+			bricks[loc].vis=false
+			points+=10*chain*point_mult
+			if combo then
+				chain+=1
+				chain=mid(1,chain,7) -- 7 is max combo multiplier
+			end
+		else
+			sfx(11)
+			-- needs to be hit twice
+			-- switch to normal brick
+			bricks[loc].type="b"
+		end		
+	elseif bricks[loc].type=="e" then
 		sfx(2+chain)
-		brick_type[loc]="zz" -- brick about to explode
-		points+=10*chain
+		bricks[loc].type="zz" -- brick about to explode
+		points+=10*chain*point_mult
 		if combo then
 			chain+=1
 			chain=mid(1,chain,7)
 		end
-	elseif brick_type[loc]=="p" then
+	elseif bricks[loc].type=="p" then
 		sfx(2+chain)
-		brick_vis[loc]=false
-		points+=10*chain
+		bricks[loc].vis=false
+		points+=10*chain*point_mult
 		if combo then
 			chain+=1
 			chain=mid(1,chain,7)
 		end
-		spawn_pill(brick_x[loc],brick_y[loc])
+		spawn_pill(bricks[loc].x,bricks[loc].y)
 	end
 end
 
 
 function spawn_pill(x,y)
-	add(pill_x,x)
-	add(pill_y,y)
-	add(pill_vis,true)
-	local typ=flr(rnd(7)) -- choose random powerup
-	add(pill_type,typ)
+	local pill={}
+	pill.x=x
+	pill.y=y
+	--local typ=flr(rnd(7)) -- choose random powerup
+	local typ=flr(rnd(2))
+	if typ==0 then
+		typ=2
+	else
+	 typ=6
+	end
+	pill.type=typ
+	add(pills,pill)
 end
 
 
 function get_powerup(p)
 	if p==0 then -- slowdown
 	 powerup=0
-	 powerup_time=0
+	 powerup_time=900 -- 15 sec
 	elseif p==1 then -- life
 	 powerup=-1 -- powerup is 1 time thing
 	 powerup_time=0
 	 lives+=1
 	elseif p==2 then -- catch/sticky
-	 powerup=2
-	 powerup_time=900 -- 15 sec
+	 --powerup=2
+	 --powerup_time=900 -- 15 sec
+	 -- check to see if there's already a ball stuck
+	 -- if not, catch the next ball
+	 local has_stuck=false
+	 for i=1,#balls do
+	 	if balls[i].stuck then
+	 		has_stuck=true
+	 	end
+	 end
+	 if not has_stuck then
+	 	sticky=true
+	 end
 	elseif p==3 then -- expand
 	 powerup=3
-	 powerup_time=0
+	 powerup_time=900 -- 15 sec
 	elseif p==4 then -- reduce
 	 powerup=4
-	 powerup_time=0
+	 powerup_time=900 -- 15 sec
 	elseif p==5 then -- megaball
 	 powerup=5
-	 powerup_time=0
+	 powerup_time=900 -- 15 sec
 	elseif p==6 then -- multiball
 		powerup=6
 	 powerup_time=0
+	 release_stuck_balls()
+	 multiball()
 	end
 end
 
 
+function multiball()
+	local ball2 = copy_ball(balls[1])
+	local ball3 = copy_ball(balls[1])
+	
+	-- adjust angles of new balls
+	if balls[1].ang==0 then
+		set_ang(ball2,1)
+		set_ang(ball3,2)
+	elseif balls[1].ang==1 then
+		set_ang(ball2,0)
+		set_ang(ball3,2)
+	else -- balls[1].ang==2
+		set_ang(ball2,0)
+		set_ang(ball3,1)
+	end
+	
+	add(balls,ball2)
+	add(balls,ball3)
+end
+
+
+function copy_ball(orig_ball)
+	local ball={}
+	ball.x=orig_ball.x
+	ball.y=orig_ball.y
+	ball.dx=orig_ball.dx
+	ball.dy=orig_ball.dy
+	ball.ang=orig_ball.ang
+	ball.stuck=orig_ball.stuck
+	return ball
+end
+
+
 function check_explosions()
-	for i=1,#brick_x do
-		if brick_vis[i] and brick_type[i]=="zz" then
-			brick_type[i]="z"
+	for i=1,#bricks do
+		if bricks[i].vis and bricks[i].type=="zz" then
+			bricks[i].type="z"
 		end
 	end
 	
-	for i=1,#brick_x do
-		if brick_vis[i] and brick_type[i]=="z" then
+	for i=1,#bricks do
+		if bricks[i].vis and bricks[i].type=="z" then
 			explode_brick(i)
 		end
 	end
 	
-	for i=1,#brick_x do
-		if brick_vis[i] and brick_type[i]=="zz" then
-			brick_type[i]="z"
+	for i=1,#bricks do
+		if bricks[i].vis and bricks[i].type=="zz" then
+			bricks[i].type="z"
 		end
 	end
 end
 
 
 function explode_brick(loc)
-	brick_vis[loc]=false
-	for i=1,#brick_x do
+	bricks[loc].vis=false
+	for i=1,#bricks do
 		if i!=loc -- not the exploding brick
-		and brick_vis[i]
-		and abs(brick_x[i]-brick_x[loc])<=(brick_w+2)
-		and abs(brick_y[i]-brick_y[loc])<=(brick_h+2)
+		and bricks[loc].vis
+		and abs(bricks[i].x-bricks[loc].x)<=(brick_w+2)
+		and abs(bricks[i].y-bricks[loc].y)<=(brick_h+2)
 		then
 			hit_brick(i,false)
 		end
@@ -396,10 +517,10 @@ end
 
 function level_finished()
 	-- no bricks in level
-	if #brick_vis==0 then return true end
+	if #bricks==0 then return true end
 
-	for i=1,#brick_vis do
-		if brick_vis[i] and brick_type[i]!="i" then
+	for i=1,#bricks do
+		if bricks[i].vis and bricks[i].type!="i" then
 			return false
 		end
 	end
@@ -427,29 +548,24 @@ function start_game()
 
  pad_x=52
  pad_y=120
- pad_w=24
+ pad_w=24 -- current pad width (including powerups)
+ pad_w_orig=24 -- base pad width
  pad_h=3
 	pad_dx=0
  pad_clr=7
-
- brick_x={}
- brick_y={}
- brick_vis={}
- brick_type={}
- brick_w=9
- brick_h=4
-
+ 
 	level_num=1
 	level=levels[level_num]
-
+ bricks={}
+ brick_w=9
+ brick_h=4
  build_bricks(level)
 
  lives=3
  points=0
-	
-	sticky=true
 
 	chain=1 -- combo chain multiplier
+	point_mult=1 -- powerup multiplier
 	
  serve_ball()
 end
@@ -500,30 +616,36 @@ end
 
 
 function add_brick(loc,typ)
+	local brick={}
 	-- 4 px padding from left of screen
 	-- loc-1 to start at 0 (since lua is 1-based index)
 	-- mod 11 (11 bricks per row) to figure out if new row (then start back at left)
 	-- add 1 px padding between bricks (but 2 since width + 1 for starting x location)
-	add(brick_x,4+((loc-1)%11)*(brick_w+2))
+	brick.x=4+((loc-1)%11)*(brick_w+2)
 	-- 20 px padding from top of screen
 	-- flr(loc/11) to figure out which row brick should be on
 	-- add 1 px padding between rows (but 2 since height + 1 for starting y location)
-	add(brick_y,20+flr((loc-1)/11)*(brick_h+2))
-	add(brick_vis,true)
-	add(brick_type,typ)
+	brick.y=20+flr((loc-1)/11)*(brick_h+2)
+	brick.vis=true
+	brick.type=typ
+	add(bricks,brick)
 end
 
 
 function serve_ball()
-	ball_x=pad_x+flr(pad_w/2)
- ball_y=pad_y-ball_r
- ball_dx=1
- ball_dy=-1
- ball_ang=1
+	balls={}
+	balls[1]=new_ball()
+	balls[1].x=pad_x+flr(pad_w/2)
+ balls[1].y=pad_y-ball_r
+ balls[1].dx=1
+ balls[1].dy=-1
+ balls[1].ang=1
+ balls[1].stuck=true
  
  reset_pills()
  
- sticky=true
+ sticky=false
+ sticky_x=flr(pad_w/2)
  
  chain=1
  
@@ -532,11 +654,20 @@ function serve_ball()
 end
 
 
+function new_ball()
+	local ball={}
+	ball.x=0
+ ball.y=0
+ ball.dx=0
+ ball.dy=0
+ ball.ang=1
+ ball.stuck=false
+ return ball
+end
+
+
 function reset_pills()
-	pill_x={}
-	pill_y={}
-	pill_vis={}
-	pill_type={}
+	pills={}
 end
 
 
@@ -573,10 +704,9 @@ function next_level()
 		return
 	end
 	level=levels[level_num]
-
  build_bricks(level)
-	
-	sticky=true
+ 
+ sticky=false
 
 	chain=1
 	
@@ -595,39 +725,47 @@ end
 function draw_game()
  cls(1) -- clear screen and set background color
 
- circfill(ball_x,ball_y,ball_r,ball_clr)
- rectfill(pad_x,pad_y,pad_x+pad_w,pad_y+pad_h,pad_clr)
-
-	-- draw ball launch direction arrow
-	if sticky then
-		line(ball_x+ball_dx*3,ball_y+ball_dy*3,ball_x+ball_dx*5,ball_y+ball_dy*5,10)
+	-- balls
+	for i=1,#balls do
+ 	circfill(balls[i].x,balls[i].y,ball_r,ball_clr)
+		if balls[i].stuck then
+			-- ball launch direction arrow
+			line(balls[i].x+balls[i].dx*3,balls[i].y+balls[i].dy*3,balls[i].x+balls[i].dx*5,balls[i].y+balls[i].dy*5,10)
+		end
 	end
 
-	-- draw bricks
+	-- pad
+ rectfill(pad_x,pad_y,pad_x+pad_w,pad_y+pad_h,pad_clr)
+
+	-- bricks
 	local brick_clr
-	for i=1,#brick_x do
-		if brick_vis[i] then
-			if brick_type[i]=="b" then brick_clr=14
-			elseif brick_type[i]=="i" then brick_clr=6
-			elseif brick_type[i]=="h" then brick_clr=15
-			elseif brick_type[i]=="e" then brick_clr=9
-			elseif brick_type[i]=="z" then brick_clr=8 -- exploding brick about to explode
-			elseif brick_type[i]=="p" then brick_clr=11
+	for i=1,#bricks do
+		if bricks[i].vis then
+			if bricks[i].type=="b" then
+				brick_clr=14
+			elseif bricks[i].type=="i" then
+				brick_clr=6
+			elseif bricks[i].type=="h" then
+				brick_clr=15
+			elseif bricks[i].type=="e" then
+				brick_clr=9
+			elseif bricks[i].type=="z" or bricks[i].type=="zz" then -- exploding brick about to explode
+				brick_clr=8
+			elseif bricks[i].type=="p" then
+				brick_clr=11
 			end
-			rectfill(brick_x[i],brick_y[i],brick_x[i]+brick_w,brick_y[i]+brick_h,brick_clr)
+			rectfill(bricks[i].x,bricks[i].y,bricks[i].x+brick_w,bricks[i].y+brick_h,brick_clr)
 		end
 	end
 	
-	-- draw pills (powerups)
-	for i=1,#pill_x do
-		if pill_vis[i] then
-			if pill_type[i]==4 then
-				palt(0,false) -- mark black as valid color
-				palt(15,true) -- mark tan as "transparent" color
-			end
-			spr(pill_type[i],pill_x[i],pill_y[i])
-			palt() -- reset all colors to default transparency
+	-- pills (powerups)
+	for i=1,#pills do
+		if pills[i].type==4 then
+			palt(0,false) -- mark black as valid color
+			palt(15,true) -- mark tan as "transparent" color
 		end
+			spr(pills[i].type,pills[i].x,pills[i].y)
+			palt() -- reset all colors to default transparency
 	end
 
 	-- top bar
