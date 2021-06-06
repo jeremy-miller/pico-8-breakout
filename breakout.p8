@@ -3,18 +3,40 @@ version 32
 __lua__
 function _init()
  cls()
+ 
  mode="start"
+ 
  levels={}
- levels[1]="b9b/p9p"
+ levels[1]="b9b/p9p//ebebebebeb"
  levels[2]="bxbxbxbxb"
  level_num=1
+ 
+ shake_str=0 -- strength of screenshake
+	
+	blink_grn=7
+	blink_grn_idx=1
+	blink_gry=6
+	blink_gry_idx=1
+	blink_frame=0
+	blink_speed=7
+	
+	start_countdown=-1
+	game_over_countdown=-1
+	
+	fade_prct=0
+	
+	arrow_mult=1
+	arrow_frame=0
  
  debug=""
 end
 -->8
 function _update60()
+	blink()
+	screenshake()
 	if mode=="game" then update_game()
 	elseif mode=="start" then update_start()
+	elseif mode=="game_over_wait" then update_game_over_wait()
 	elseif mode=="game_over" then update_game_over()
 	elseif mode=="level_over" then update_level_over()
 	end
@@ -22,13 +44,21 @@ end
 
 
 function update_game()
+	-- fade in
+	if fade_prct>0 then
+		fade_prct-=0.05
+		if fade_prct<0 then
+			fade_prct=0
+		end
+	end
+
 	-- pad update
 	
 	-- update pad width from powerups
-	if powerup==3 then
+	if timer_expand>0 then
 		-- expand powerup
 		pad_w=flr(pad_w_orig*1.5)
-	elseif powerup==4 then
+	elseif timer_reduce>0 then
 		-- reduce powerup
 		pad_w=flr(pad_w_orig/2)
 		point_mult=2
@@ -77,12 +107,15 @@ function update_game()
 		level_over()
 	end
 	
-	-- tick powerup timer
-	if powerup>=0 then
-		powerup_time-=1
-		if powerup_time<=0 then
-			powerup=-1
-		end
+	-- tick powerup timers
+	if timer_slowdown>0 then
+		timer_slowdown-=1
+	elseif timer_expand>0 then
+		timer_expand-=1
+	elseif timer_reduce>0 then
+		timer_reduce-=1
+	elseif timer_megaball>0 then
+		timer_megaball-=1
 	end
 
 	-- move pills and pick up powerups
@@ -107,7 +140,7 @@ function update_ball(ball_idx)
 	else
 		-- normal ball collision physics
 	 
-	 if powerup==0 then
+	 if timer_slowdown>0 then
 	 	-- slowdown
 	 	next_x=b.x+(b.dx/2)
 	 	next_y=b.y+(b.dy/2)
@@ -191,8 +224,8 @@ function update_ball(ball_idx)
 			-- check if ball will collide with brick
 		 if bricks[i].vis and ball_hit_box(next_x,next_y,bricks[i].x,bricks[i].y,brick_w,brick_h) then
 		 	if not brick_hit then
-			 	if (powerup==5 and bricks[i].type=="i") -- megaball and indestructible brick
-			 	or powerup!=5
+			 	if (timer_megaball>0 and bricks[i].type=="i") -- megaball and indestructible brick
+			 	or timer_megaball<=0
 			 	then
 			 		-- check if ball will collide with side of brick
 						if deflect_ball_horz(b.x,b.y,b.dx,b.dy,bricks[i].x,bricks[i].y,brick_w,brick_h) then
@@ -214,8 +247,10 @@ function update_ball(ball_idx)
 	 if next_y > 127 then
 	 	sfx(2)
 	 	if #balls>1 then
+		 	shake_str+=0.15
 	 		del(balls,b)
 	 	else
+		 	shake_str+=0.4
 	 		lives-=1
 		 	if lives<0 then
 		 		game_over()
@@ -356,7 +391,7 @@ function hit_brick(loc,combo)
 	elseif bricks[loc].type=="i" then
 		sfx(10)
 	elseif bricks[loc].type=="h" then
-		if powerup==5 then -- megaball
+		if timer_megaball>0 then
 			sfx(2+chain) -- combo sound effects go from 3-9
 			bricks[loc].vis=false
 			points+=10*chain*point_mult
@@ -395,13 +430,7 @@ function spawn_pill(x,y)
 	local pill={}
 	pill.x=x
 	pill.y=y
-	--local typ=flr(rnd(7)) -- choose random powerup
-	local typ=flr(rnd(2))
-	if typ==0 then
-		typ=2
-	else
-	 typ=6
-	end
+	local typ=flr(rnd(7)) -- choose random powerup
 	pill.type=typ
 	add(pills,pill)
 end
@@ -409,15 +438,10 @@ end
 
 function get_powerup(p)
 	if p==0 then -- slowdown
-	 powerup=0
-	 powerup_time=900 -- 15 sec
+	 timer_slowdown=900 -- 15 sec
 	elseif p==1 then -- life
-	 powerup=-1 -- powerup is 1 time thing
-	 powerup_time=0
 	 lives+=1
 	elseif p==2 then -- catch/sticky
-	 --powerup=2
-	 --powerup_time=900 -- 15 sec
 	 -- check to see if there's already a ball stuck
 	 -- if not, catch the next ball
 	 local has_stuck=false
@@ -430,38 +454,40 @@ function get_powerup(p)
 	 	sticky=true
 	 end
 	elseif p==3 then -- expand
-	 powerup=3
-	 powerup_time=900 -- 15 sec
+	 timer_expand=900 -- 15 sec
+	 timer_reduce=0 -- mutually exclusive
 	elseif p==4 then -- reduce
-	 powerup=4
-	 powerup_time=900 -- 15 sec
+	 timer_reduce=900 -- 15 sec
+	 timer_expand=0 -- mutually exclusive
 	elseif p==5 then -- megaball
-	 powerup=5
-	 powerup_time=900 -- 15 sec
+	 timer_megaball=900 -- 15 sec
 	elseif p==6 then -- multiball
-		powerup=6
-	 powerup_time=0
-	 release_stuck_balls()
 	 multiball()
 	end
 end
 
 
 function multiball()
-	local ball2 = copy_ball(balls[1])
-	local ball3 = copy_ball(balls[1])
+	local idx=flr(rnd(#balls))+1 -- choose random ball as source for multiball
+	local orig_ball=balls[idx] -- ball being copied, source of multiball
+	local ball2=copy_ball(orig_ball)
+	local ball3=copy_ball(orig_ball)
 	
 	-- adjust angles of new balls
-	if balls[1].ang==0 then
+	if orig_ball.ang==0 then
 		set_ang(ball2,1)
 		set_ang(ball3,2)
-	elseif balls[1].ang==1 then
+	elseif orig_ball.ang==1 then
 		set_ang(ball2,0)
 		set_ang(ball3,2)
-	else -- balls[1].ang==2
+	else -- orig_ball.ang==2
 		set_ang(ball2,0)
 		set_ang(ball3,1)
 	end
+	
+	-- make sure new balls aren't stuck to pad
+	ball2.stuck=false
+	ball3.stuck=false
 	
 	add(balls,ball2)
 	add(balls,ball3)
@@ -490,6 +516,11 @@ function check_explosions()
 	for i=1,#bricks do
 		if bricks[i].vis and bricks[i].type=="z" then
 			explode_brick(i)
+			shake_str+=0.25
+			-- cap explosion screenshake
+			if shake_str>1 then
+				shake_str=1
+			end
 		end
 	end
 	
@@ -505,7 +536,7 @@ function explode_brick(loc)
 	bricks[loc].vis=false
 	for i=1,#bricks do
 		if i!=loc -- not the exploding brick
-		and bricks[loc].vis
+		and bricks[i].vis
 		and abs(bricks[i].x-bricks[loc].x)<=(brick_w+2)
 		and abs(bricks[i].y-bricks[loc].y)<=(brick_h+2)
 		then
@@ -534,8 +565,20 @@ end
 
 
 function update_start()
-	if btnp(❎) then
-		start_game()
+	if start_countdown<0 then -- haven't started game yet
+		if btnp(❎) then
+			start_countdown=80
+			blink_speed=1
+			sfx(13)
+		end
+	else -- game starting
+		start_countdown-=1
+		fade_prct=(80-start_countdown)/80 -- link fade and countdown lengths
+		if start_countdown<=0 then
+			start_countdown=-1
+			blink_speed=8
+			start_game()
+		end
 	end
 end
 
@@ -561,7 +604,7 @@ function start_game()
  brick_h=4
  build_bricks(level)
 
- lives=3
+ lives=0
  points=0
 
 	chain=1 -- combo chain multiplier
@@ -646,11 +689,13 @@ function serve_ball()
  
  sticky=false
  sticky_x=flr(pad_w/2)
+
+	timer_slowdown=0
+	timer_expand=0
+	timer_reduce=0
+	timer_megaball=0
  
  chain=1
- 
-	powerup=-1
-	powerup_time=0
 end
 
 
@@ -670,15 +715,37 @@ function reset_pills()
 	pills={}
 end
 
+function update_game_over_wait()
+	game_over_countdown-=1
+	if game_over_countdown<=0 then
+		game_over_countdown=-1
+		mode="game_over"
+	end
+end
+
 
 function game_over()
-	mode="game_over"
+	mode="game_over_wait"
+	game_over_countdown=60
+	blink_speed=12
 end
 
 
 function update_game_over()
-	if btnp(❎) then
-		start_game()
+	if game_over_countdown<0 then
+		if btnp(❎) then
+			game_over_countdown=80
+			blink_speed=1
+			sfx(13)
+		end
+	else
+		game_over_countdown-=1
+		fade_prct=(80-game_over_countdown)/80 -- link fade and countdown lengths
+		if game_over_countdown<=0 then
+			game_over_countdown=-1
+			blink_speed=8
+			start_game()
+		end
 	end
 end
 
@@ -716,21 +783,33 @@ end
 function _draw()
 	if mode=="game" then draw_game()
 	elseif mode=="start" then draw_start()
+	elseif mode=="game_over_wait" then draw_game() -- wait for screenshake to finish
 	elseif mode=="game_over" then draw_game_over()
 	elseif mode=="level_over" then draw_level_over()
+	end
+	
+	pal() -- reset palette
+	-- fade screen
+	if fade_prct>0 then
+		fade_palette(fade_prct)
 	end
 end
 
 
 function draw_game()
- cls(1) -- clear screen and set background color
+ cls()
+ rectfill(0,0,127,127,1) -- set background color
 
 	-- balls
 	for i=1,#balls do
  	circfill(balls[i].x,balls[i].y,ball_r,ball_clr)
 		if balls[i].stuck then
-			-- ball launch direction arrow
-			line(balls[i].x+balls[i].dx*3,balls[i].y+balls[i].dy*3,balls[i].x+balls[i].dx*5,balls[i].y+balls[i].dy*5,10)
+			-- draw trajectory preview
+			pset(
+				balls[i].x+balls[i].dx*3*arrow_mult,
+				balls[i].y+balls[i].dy*3*arrow_mult,
+				10
+			)
 		end
 	end
 
@@ -785,7 +864,7 @@ function draw_start()
 	local text="breakout"
 	print(text,hcenter(text),40,7)
 	text="press ❎ to start"
-	print(text,hcenter(text),80,11)
+	print(text,hcenter(text),80,blink_grn)
 end
 
 
@@ -794,7 +873,7 @@ function draw_game_over()
 	local text="game over"
 	print(text,hcenter(text),62,7)
 	text="press ❎ to restart"
-	print(text,hcenter(text),69,6)
+	print(text,hcenter(text),69,blink_gry)
 end
 
 
@@ -813,6 +892,93 @@ function hcenter(text)
  --  * width of a character)
  return 64-(#text*2)
 end
+-->8
+function screenshake()
+	-- random number between -16 and 16
+	local shake_x=16-rnd(32)
+	local shake_y=16-rnd(32)
+	
+	shake_x=shake_x*shake_str
+	shake_y=shake_y*shake_str
+	
+	camera(shake_x,shake_y)
+	
+	-- reduce screenshake every frame
+	shake_str=shake_str*0.95
+	
+	-- make sure we actually stop screenshaking eventually
+	if shake_str<0.05 then
+		shake_str=0
+	end
+end
+
+function blink()
+	-- text blinking
+	local grn_color_map={3,11,7,11}
+	local gry_color_map={5,6,7,6}
+	blink_frame+=1
+	if blink_frame>blink_speed then
+		blink_frame=0
+
+		blink_grn_idx+=1
+		if blink_grn_idx>#grn_color_map then
+			blink_grn_idx=1
+		end
+		blink_grn=grn_color_map[blink_grn_idx]
+
+		blink_gry_idx+=1
+		if blink_gry_idx>#gry_color_map then
+			blink_gry_idx=1
+		end
+		blink_gry=gry_color_map[blink_gry_idx]		
+	end
+	
+	-- trajectory preview animation
+	arrow_frame+=1
+	if arrow_frame>20 then
+		arrow_frame=0
+	end
+	arrow_mult=1+(1*(arrow_frame/20))
+	
+end
+
+function fade_palette(prct)
+	-- 0 = normal
+	-- 1 = completely black
+	
+	local j_max,clr
+	
+	-- turn prct into valid percentage number.
+	-- how dark a color should get.
+	local percent=flr(mid(0,prct,1)*100)
+	
+	-- palette shifting array.
+	-- faded color version for every color.
+	-- color 1 becomes 0
+	-- color 2 becomes 1
+	-- color 3 becomes 1
+	-- etc
+	local faded_palette={0,1,1,2,1,13,6,4,4,9,3,13,1,13,14}
+	
+	-- loop through all colors
+	for i=1,15 do
+		clr=i
+		-- calculate how many times we
+		-- want to fade the color.
+		-- when j_max reaches 5, every
+		-- color is turned to black.
+	 j_max=(percent+(i*1.46))/22
+	 
+	 -- send color through faded_palette
+	 -- j_max times to derive final color.
+	 for j=1,j_max do
+	 	clr=faded_palette[clr]
+	 end
+	 -- change palette color
+	 pal(i,clr,1)
+	end
+end
+
 __gfx__
 06777760067777600677776006777760f677777f0677776006777760000000000000000000000000000000000000000000000000000000000000000000000000
 559949955576777555b33bb555c1c1c55508800555e222e555828885000000000000000000000000000000000000000000000000000000000000000000000000
@@ -836,3 +1002,4 @@ __sfx__
 0002000021360213601c3001c30033300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000200002036024360243502433033300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00040000203102332026330293402c350253001f30000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000400001b3701d3701f36021360233502535027340293402b3302d3302f320313203331035310000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
