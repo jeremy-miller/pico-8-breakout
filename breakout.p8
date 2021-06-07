@@ -26,7 +26,11 @@ function _init()
 	fade_prct=0
 	
 	arrow_mult=1
+	arrow_mult2=1
 	arrow_frame=0
+	arrow_frame2=0
+	
+	particles={}
  
  debug=""
 end
@@ -34,6 +38,7 @@ end
 function _update60()
 	blink()
 	screenshake()
+	update_particles()
 	if mode=="game" then update_game()
 	elseif mode=="start" then update_start()
 	elseif mode=="game_over_wait" then update_game_over_wait()
@@ -242,6 +247,8 @@ function update_ball(ball_idx)
 	
 	 b.x=next_x
 	 b.y=next_y
+	 
+	 spawn_ball_trail(next_x,next_y)
 	
 	 -- check if ball is out of bounds after its moved
 	 if next_y > 127 then
@@ -800,22 +807,6 @@ function draw_game()
  cls()
  rectfill(0,0,127,127,1) -- set background color
 
-	-- balls
-	for i=1,#balls do
- 	circfill(balls[i].x,balls[i].y,ball_r,ball_clr)
-		if balls[i].stuck then
-			-- draw trajectory preview
-			pset(
-				balls[i].x+balls[i].dx*3*arrow_mult,
-				balls[i].y+balls[i].dy*3*arrow_mult,
-				10
-			)
-		end
-	end
-
-	-- pad
- rectfill(pad_x,pad_y,pad_x+pad_w,pad_y+pad_h,pad_clr)
-
 	-- bricks
 	local brick_clr
 	for i=1,#bricks do
@@ -847,13 +838,36 @@ function draw_game()
 			palt() -- reset all colors to default transparency
 	end
 
+	draw_particles()
+
+	-- balls
+	for i=1,#balls do
+ 	circfill(balls[i].x,balls[i].y,ball_r,ball_clr)
+		if balls[i].stuck then
+			-- draw trajectory preview
+			pset(
+				balls[i].x+balls[i].dx*4*arrow_mult,
+				balls[i].y+balls[i].dy*4*arrow_mult,
+				10
+			)
+			pset(
+				balls[i].x+balls[i].dx*4*arrow_mult2,
+				balls[i].y+balls[i].dy*4*arrow_mult2,
+				10
+			)
+		end
+	end
+
+	-- pad
+ rectfill(pad_x,pad_y,pad_x+pad_w,pad_y+pad_h,pad_clr)
+
 	-- top bar
  rectfill(0,0,128,6,0)
  if debug!="" then
  	print(debug,1,1,7)
  else
 	 print("lives:"..lives,1,1,7)
- 	print("points:"..points,50,1,7)
+ 	print("points:"..points,40,1,7)
  	print("chain:"..chain.."x",96,1,7)
  end
 end
@@ -934,12 +948,19 @@ function blink()
 	end
 	
 	-- trajectory preview animation
+	-- first dot
 	arrow_frame+=1
-	if arrow_frame>20 then
+	if arrow_frame>30 then
 		arrow_frame=0
 	end
-	arrow_mult=1+(1*(arrow_frame/20))
-	
+	arrow_mult=1+(1.5*(arrow_frame/30))
+	-- second dot
+	arrow_frame2=arrow_frame+15 -- where current arrow_frame would be in 15 frames
+	if arrow_frame2>30 then
+		-- reset back to lowest point
+		arrow_frame2=arrow_frame2-30
+	end
+	arrow_mult2=1+(1.5*(arrow_frame2/30))
 end
 
 function fade_palette(prct)
@@ -976,6 +997,65 @@ function fade_palette(prct)
 	 end
 	 -- change palette color
 	 pal(i,clr,1)
+	end
+end
+
+
+function add_particle(x,y,typ,max_age,clr,old_clr)
+	local p={}
+	p.x=x
+	p.y=y
+	p.type=typ
+	p.max_age=max_age
+	p.age=0
+	p.clr=clr
+	p.old_clr=old_clr
+	add(particles,p)
+end
+
+
+function spawn_ball_trail(x,y)
+	local ang=rnd() -- random angle
+	-- add offset to x/y so particles
+	-- appear behind full diameter of ball
+	local offset_x=sin(ang)*ball_r*0.6
+	local offset_y=cos(ang)*ball_r*0.6
+	add_particle(
+		x+offset_x,
+		y+offset_y,
+		0,
+		8+rnd(15), -- add rnd so trail "trails off" at end
+		10,
+		9
+	)
+end
+
+
+function update_particles()
+	local p
+	for i=#particles,1,-1 do
+		p=particles[i]
+		p.age+=1
+		if p.age>p.max_age then
+			del(particles,p)
+		else
+			if (p.age/p.max_age)>0.5 then
+				p.clr=p.old_clr
+			end
+		end
+	end
+end
+
+
+-- particle types
+-- 0 = single particle
+function draw_particles()
+	local p
+	for i=1,#particles do
+		p=particles[i]
+		if p.type==0 then -- single particle
+			pset(p.x,p.y,p.clr)
+		end
 	end
 end
 
