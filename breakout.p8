@@ -7,7 +7,7 @@ function _init()
  mode="start"
  
  levels={}
- levels[1]="b9b/p9p//ebebebebeb"
+ levels[1]="b9b/b9b"
  levels[2]="bxbxbxbxb"
  level_num=1
  
@@ -388,7 +388,9 @@ end
 
 function hit_brick(loc,combo)
 	if bricks[loc].type=="b" then
+		-- normal
 		sfx(2+chain) -- combo sound effects go from 3-9
+		shatter_brick(bricks[loc])
 		bricks[loc].vis=false
 		points+=10*chain*point_mult
 		if combo then
@@ -396,8 +398,10 @@ function hit_brick(loc,combo)
 			chain=mid(1,chain,7) -- 7 is max combo multiplier
 		end
 	elseif bricks[loc].type=="i" then
+		-- indestructible
 		sfx(10)
 	elseif bricks[loc].type=="h" then
+		-- hardened
 		if timer_megaball>0 then
 			sfx(2+chain) -- combo sound effects go from 3-9
 			bricks[loc].vis=false
@@ -413,6 +417,7 @@ function hit_brick(loc,combo)
 			bricks[loc].type="b"
 		end		
 	elseif bricks[loc].type=="e" then
+		-- exploding
 		sfx(2+chain)
 		bricks[loc].type="zz" -- brick about to explode
 		points+=10*chain*point_mult
@@ -421,7 +426,9 @@ function hit_brick(loc,combo)
 			chain=mid(1,chain,7)
 		end
 	elseif bricks[loc].type=="p" then
+		-- powerup
 		sfx(2+chain)
+		shatter_brick(bricks[loc])
 		bricks[loc].vis=false
 		points+=10*chain*point_mult
 		if combo then
@@ -611,7 +618,7 @@ function start_game()
  brick_h=4
  build_bricks(level)
 
- lives=0
+ lives=3
  points=0
 
 	chain=1 -- combo chain multiplier
@@ -827,6 +834,8 @@ function draw_game()
 			rectfill(bricks[i].x,bricks[i].y,bricks[i].x+brick_w,bricks[i].y+brick_h,brick_clr)
 		end
 	end
+
+	draw_particles()
 	
 	-- pills (powerups)
 	for i=1,#pills do
@@ -837,8 +846,6 @@ function draw_game()
 			spr(pills[i].type,pills[i].x,pills[i].y)
 			palt() -- reset all colors to default transparency
 	end
-
-	draw_particles()
 
 	-- balls
 	for i=1,#balls do
@@ -1001,33 +1008,18 @@ function fade_palette(prct)
 end
 
 
-function add_particle(x,y,typ,max_age,clr,old_clr)
+function add_particle(x,y,dx,dy,typ,max_age,clr_array)
 	local p={}
 	p.x=x
 	p.y=y
+	p.dx=dx
+	p.dy=dy
 	p.type=typ
 	p.max_age=max_age
 	p.age=0
-	p.clr=clr
-	p.old_clr=old_clr
+	p.clr_array=clr_array
+	p.clr=0
 	add(particles,p)
-end
-
-
-function spawn_ball_trail(x,y)
-	local ang=rnd() -- random angle
-	-- add offset to x/y so particles
-	-- appear behind full diameter of ball
-	local offset_x=sin(ang)*ball_r*0.6
-	local offset_y=cos(ang)*ball_r*0.6
-	add_particle(
-		x+offset_x,
-		y+offset_y,
-		0,
-		8+rnd(15), -- add rnd so trail "trails off" at end
-		10,
-		9
-	)
 end
 
 
@@ -1039,23 +1031,82 @@ function update_particles()
 		if p.age>p.max_age then
 			del(particles,p)
 		else
-			if (p.age/p.max_age)>0.5 then
-				p.clr=p.old_clr
+			-- change colors
+			if #p.clr_array==1 then
+				p.clr=p.clr_array[1]
+			else
+				-- 0 = just "born"
+				-- 1 = going to die
+				local clr_idx=p.age/p.max_age -- percent through life
+				clr_idx=1+flr(clr_idx*#p.clr_array) -- color corresponding to that percentage, +1 since 1-indexed arrays
+				p.clr=p.clr_array[clr_idx]
 			end
+			-- apply gravity
+			if p.type==1 then
+				p.dy+=0.1
+			end
+			
+			-- move particle
+			p.x+=p.dx
+			p.y+=p.dy
 		end
 	end
 end
 
 
 -- particle types
--- 0 = single particle
+-- 0 = ball
+-- 1 = brick
 function draw_particles()
 	local p
 	for i=1,#particles do
 		p=particles[i]
-		if p.type==0 then -- single particle
+		if p.type==0 then
+			-- ball particle
+			pset(p.x,p.y,p.clr)
+		elseif  p.type==1 then
+			-- brick particle
 			pset(p.x,p.y,p.clr)
 		end
+	end
+end
+
+
+function spawn_ball_trail(x,y)
+	if rnd()<0.5 then -- spawn half as many particles
+		local ang=rnd() -- random angle
+		-- add offset to x/y so particles
+		-- appear randomly behind ball
+		local offset_x=sin(ang)*ball_r*0.3
+		local offset_y=cos(ang)*ball_r*0.3
+		add_particle(
+			x+offset_x,
+			y+offset_y,
+			0, -- dx
+			0, -- dy
+			0, -- type
+			8+rnd(15), -- add rnd so trail "trails off" at end
+			{10,9} -- color_map
+		)
+	end
+end
+
+
+function shatter_brick(brick)
+	for i=1,10 do
+		local ang=rnd() -- random angle
+		-- random dx/dy
+		local dx=sin(ang)
+		local dy=cos(ang)
+		add_particle(
+			brick.x,
+			brick.y,
+			dx,
+			dy,
+			1, -- type
+			60, -- max_age
+			{7} -- color_map
+		)
 	end
 end
 
