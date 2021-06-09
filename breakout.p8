@@ -31,6 +31,9 @@ function _init()
 	arrow_frame2=0
 	
 	particles={}
+	
+	last_hit_dx=0
+	last_hit_dy=0
  
  debug=""
 end
@@ -134,6 +137,7 @@ function update_game()
 			del(pills,pills[i])
 		end
 	end
+	rebound_bricks()
 end
 
 function update_ball(ball_idx)
@@ -232,6 +236,9 @@ function update_ball(ball_idx)
 			 	if (timer_megaball>0 and bricks[i].type=="i") -- megaball and indestructible brick
 			 	or timer_megaball<=0
 			 	then
+			 		-- save ball speed before deflection
+						last_hit_dx=b.dx
+						last_hit_dy=b.dy
 			 		-- check if ball will collide with side of brick
 						if deflect_ball_horz(b.x,b.y,b.dx,b.dy,bricks[i].x,bricks[i].y,brick_w,brick_h) then
 							b.dx=-b.dx
@@ -387,10 +394,12 @@ end
 
 
 function hit_brick(loc,combo)
+	local flash_time=5
 	if bricks[loc].type=="b" then
 		-- normal
 		sfx(2+chain) -- combo sound effects go from 3-9
-		shatter_brick(bricks[loc])
+		shatter_brick(bricks[loc],last_hit_dx,last_hit_dy)
+		bricks[loc].flash=flash_time
 		bricks[loc].vis=false
 		points+=10*chain*point_mult
 		if combo then
@@ -404,6 +413,7 @@ function hit_brick(loc,combo)
 		-- hardened
 		if timer_megaball>0 then
 			sfx(2+chain) -- combo sound effects go from 3-9
+			bricks[loc].flash=flash_time
 			bricks[loc].vis=false
 			points+=10*chain*point_mult
 			if combo then
@@ -428,7 +438,8 @@ function hit_brick(loc,combo)
 	elseif bricks[loc].type=="p" then
 		-- powerup
 		sfx(2+chain)
-		shatter_brick(bricks[loc])
+		shatter_brick(bricks[loc],last_hit_dx,last_hit_dy)
+		bricks[loc].flash=flash_time
 		bricks[loc].vis=false
 		points+=10*chain*point_mult
 		if combo then
@@ -685,6 +696,9 @@ function add_brick(loc,typ)
 	brick.y=20+flr((loc-1)/11)*(brick_h+2)
 	brick.vis=true
 	brick.type=typ
+	brick.flash=0 -- num frames to flash brick before disappearing
+	brick.offset_x=0
+	brick.offset_y=0
 	add(bricks,brick)
 end
 
@@ -817,21 +831,27 @@ function draw_game()
 	-- bricks
 	local brick_clr
 	for i=1,#bricks do
-		if bricks[i].vis then
-			if bricks[i].type=="b" then
+		local b=bricks[i]
+		if b.vis or b.flash>0 then
+			if b.flash>0 then
+				brick_clr=7
+				b.flash-=1
+			elseif b.type=="b" then
 				brick_clr=14
-			elseif bricks[i].type=="i" then
+			elseif b.type=="i" then
 				brick_clr=6
-			elseif bricks[i].type=="h" then
+			elseif b.type=="h" then
 				brick_clr=15
-			elseif bricks[i].type=="e" then
+			elseif b..type=="e" then
 				brick_clr=9
-			elseif bricks[i].type=="z" or bricks[i].type=="zz" then -- exploding brick about to explode
+			elseif b..type=="z" or b.type=="zz" then -- exploding brick about to explode
 				brick_clr=8
-			elseif bricks[i].type=="p" then
+			elseif b..type=="p" then
 				brick_clr=11
 			end
-			rectfill(bricks[i].x,bricks[i].y,bricks[i].x+brick_w,bricks[i].y+brick_h,brick_clr)
+			local bx=b.x+b.offset_x
+			local by=b.y+b.offset_y
+			rectfill(bx,by,bx+brick_w,by+brick_h,brick_clr)
 		end
 	end
 
@@ -1015,8 +1035,8 @@ function add_particle(x,y,dx,dy,typ,max_age,clr_array)
 	p.dx=dx
 	p.dy=dy
 	p.type=typ
-	p.max_age=max_age
-	p.age=0
+	p.max_age=max_age -- in frames
+	p.age=0 -- in frames
 	p.clr_array=clr_array
 	p.clr=0
 	add(particles,p)
@@ -1030,11 +1050,20 @@ function update_particles()
 		p.age+=1
 		if p.age>p.max_age then
 			del(particles,p)
+		elseif p.x<-20 or p.x>147 then
+			-- delete if particle leaves screen
+			-- adjust for large ones
+			del(particles,p)
+		elseif p.y<-20 or p.y>147 then
+			-- delete if particle leaves screen
+			-- adjust for large ones
+			del(particles,p)
 		else
 			-- change colors
 			if #p.clr_array==1 then
 				p.clr=p.clr_array[1]
 			else
+				-- clr_idx values:
 				-- 0 = just "born"
 				-- 1 = going to die
 				local clr_idx=p.age/p.max_age -- percent through life
@@ -1043,9 +1072,8 @@ function update_particles()
 			end
 			-- apply gravity
 			if p.type==1 then
-				p.dy+=0.1
+				p.dy+=0.07
 			end
-			
 			-- move particle
 			p.x+=p.dx
 			p.y+=p.dy
@@ -1092,21 +1120,40 @@ function spawn_ball_trail(x,y)
 end
 
 
-function shatter_brick(brick)
-	for i=1,10 do
-		local ang=rnd() -- random angle
-		-- random dx/dy
-		local dx=sin(ang)
-		local dy=cos(ang)
-		add_particle(
-			brick.x,
-			brick.y,
-			dx,
-			dy,
-			1, -- type
-			60, -- max_age
-			{7} -- color_map
-		)
+function shatter_brick(brick,last_dx,last_dy)
+	-- bump brick before it shatters
+	brick.offset_x=last_dx*3
+	brick.offset_y=last_dy*3
+
+	for x=0,brick_w/1.5 do
+		for y=0,brick_h/1.5 do
+			local ang=rnd() -- random angle
+			-- random pos/neg dx/dy
+			local dx=sin(ang)*rnd(2)+(last_dx/2) -- randomize speed also
+			local dy=cos(ang)*rnd(2)+(last_dy/2) -- randomize speed also
+			add_particle(
+				brick.x+x,
+				brick.y+y,
+				dx,
+				dy,
+				1, -- type
+				80, -- max_age in frames
+				{7,6,5} -- color_map
+			)
+		end
+	end
+end
+
+
+function rebound_bricks()
+	for i=1,#bricks do
+		local b=bricks[i]
+		if b.vis or b.flash>0 then
+			if b.offset_x~=0 or b.offset_y~=0 then
+				b.offset_x-=sign(b.offset_x)
+				b.offset_y-=sign(b.offset_y)
+			end
+		end
 	end
 end
 
