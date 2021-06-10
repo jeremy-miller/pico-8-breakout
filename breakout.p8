@@ -9,7 +9,8 @@ function _init()
  mode="start"
  
  levels={}
- levels[1]="b9b/b9b/b9b"
+ --levels[1]="b9bb9bb9bb9b"
+ levels[1]="e9e"
  levels[2]="bxbxbxbxb"
  level_num=1
  
@@ -50,6 +51,7 @@ function _update60()
 	elseif mode=="start" then update_start()
 	elseif mode=="game_over_wait" then update_game_over_wait()
 	elseif mode=="game_over" then update_game_over()
+	elseif mode=="level_over_wait" then update_level_over_wait()
 	elseif mode=="level_over" then update_level_over()
 	end
 end
@@ -138,6 +140,7 @@ function update_game()
 		elseif box_hit_box(pills[i].x,pills[i].y,8,6,pad_x,pad_y,pad_w,pad_h) then
 			sfx(12)
 			get_powerup(pills[i].type)
+			spawn_powerup_puffs(pills[i].x,pills[i].y,pills[i].type)
 			del(pills,pills[i])
 		end
 	end
@@ -167,13 +170,13 @@ function update_ball(ball_idx)
 	  next_x=mid(3,next_x,125) -- make sure ball never leaves screen
 	  b.dx=-b.dx
 	  sfx(0)
-	  spawn_puff(next_x,next_y)
+	  spawn_puffs(next_x,next_y)
 	 end
 	 if next_y < 9 then
 		 next_y=mid(9,next_y,127) -- make sure ball never leaves screen
 	  b.dy=-b.dy
 	  sfx(0)
-	  spawn_puff(next_x,next_y)
+	  spawn_puffs(next_x,next_y)
 	 end
 	
 	 -- check if ball will collide with pad
@@ -224,7 +227,7 @@ function update_ball(ball_idx)
 			
 			sfx(1)
 			chain=1
-			spawn_puff(next_x,next_y)
+			spawn_puffs(next_x,next_y)
 			
 			-- catch/sticky powerup
 			if sticky and b.dy<0 then
@@ -262,16 +265,22 @@ function update_ball(ball_idx)
 	 b.x=next_x
 	 b.y=next_y
 	 
-	 spawn_ball_trail(next_x,next_y)
+	 if timer_megaball>0 then
+	 	spawn_megaball_trail(next_x,next_y)
+	 else
+		 spawn_ball_trail(next_x,next_y)
+		end
 	
 	 -- check if ball is out of bounds after its moved
 	 if next_y > 127 then
 	 	sfx(2)
+	 	timer_megaball=0
+	 	spawn_death(b.x,b.y)
 	 	if #balls>1 then
 		 	shake_str+=0.15
 	 		del(balls,b)
 	 	else
-		 	shake_str+=0.4
+		 	shake_str+=0.3
 	 		lives-=1
 		 	if lives<0 then
 		 		game_over()
@@ -436,6 +445,7 @@ function hit_brick(loc,combo)
 	elseif bricks[loc].type=="e" then
 		-- exploding
 		sfx(2+chain)
+		shatter_brick(bricks[loc],last_hit_dx,last_hit_dy)
 		bricks[loc].type="zz" -- brick about to explode
 		points+=10*chain*point_mult
 		if combo then
@@ -468,6 +478,14 @@ function spawn_pill(x,y)
 end
 
 
+-- powerups
+-- 0 = slowdown
+-- 1 = life
+-- 2 = catch/sticky
+-- 3 = expand
+-- 4 = reduce
+-- 5 = megaball
+-- 6 = multiball
 function get_powerup(p)
 	if p==0 then -- slowdown
 	 timer_slowdown=900 -- 15 sec
@@ -492,7 +510,7 @@ function get_powerup(p)
 	 timer_reduce=900 -- 15 sec
 	 timer_expand=0 -- mutually exclusive
 	elseif p==5 then -- megaball
-	 timer_megaball=900 -- 15 sec
+	 timer_megaball=120 -- 2 sec
 	elseif p==6 then -- multiball
 	 multiball()
 	end
@@ -548,10 +566,10 @@ function check_explosions()
 	for i=1,#bricks do
 		if bricks[i].vis and bricks[i].type=="z" then
 			explode_brick(i)
-			shake_str+=0.25
+			spawn_explosions(bricks[i].x,bricks[i].y)
 			-- cap explosion screenshake
-			if shake_str>1 then
-				shake_str=1
+			if shake_str<0.4 then
+				shake_str+=0.1
 			end
 		end
 	end
@@ -592,7 +610,9 @@ end
 
 
 function level_over()
-	mode="level_over"
+	mode="level_over_wait"
+	game_over_countdown=60
+	blink_speed=12
 end
 
 
@@ -786,10 +806,30 @@ function update_game_over()
 	end
 end
 
+function update_level_over_wait()
+	game_over_countdown-=1
+	if game_over_countdown<=0 then
+		game_over_countdown=-1
+		mode="level_over"
+	end
+end
+
 
 function update_level_over()
-	if btnp(❎) then
-		next_level()
+	if game_over_countdown<0 then
+		if btnp(❎) then
+			game_over_countdown=80
+			blink_speed=1
+			sfx(16)
+		end
+	else
+		game_over_countdown-=1
+		fade_prct=(80-game_over_countdown)/80 -- link fade and countdown lengths
+		if game_over_countdown<=0 then
+			game_over_countdown=-1
+			blink_speed=8
+			next_level()
+		end
 	end
 end
 
@@ -824,6 +864,7 @@ function _draw()
 	elseif mode=="start" then draw_start()
 	elseif mode=="game_over_wait" then draw_game() -- wait for screenshake to finish
 	elseif mode=="game_over" then draw_game_over()
+	elseif mode=="level_over_wait" then draw_game() -- wait for screenshake to finish
 	elseif mode=="level_over" then draw_level_over()
 	end
 	
@@ -853,11 +894,11 @@ function draw_game()
 				brick_clr=6
 			elseif b.type=="h" then
 				brick_clr=15
-			elseif b..type=="e" then
+			elseif b.type=="e" then
 				brick_clr=9
-			elseif b..type=="z" or b.type=="zz" then -- exploding brick about to explode
+			elseif b.type=="z" or b.type=="zz" then -- exploding brick about to explode
 				brick_clr=8
-			elseif b..type=="p" then
+			elseif b.type=="p" then
 				brick_clr=11
 			end
 			local bx=b.x+b.offset_x
@@ -880,6 +921,11 @@ function draw_game()
 
 	-- balls
 	for i=1,#balls do
+		if timer_megaball>0 then
+			ball_clr=14
+		else
+			ball_clr=10
+		end
  	circfill(balls[i].x,balls[i].y,ball_r,ball_clr)
 		if balls[i].stuck then
 			-- draw trajectory preview
@@ -934,7 +980,7 @@ function draw_level_over()
 	local text="stage clear"
 	print(text,hcenter(text),62,7)
 	text="press ❎ to continue"
-	print(text,hcenter(text),69,6)
+	print(text,hcenter(text),69,blink_gry)
 end
 
 
@@ -1176,12 +1222,33 @@ function spawn_ball_trail(x,y)
 end
 
 
+function spawn_megaball_trail(x,y)
+	local ang=rnd() -- random angle
+	-- add offset to x/y so particles
+	-- appear randomly behind ball
+	local offset_x=sin(ang)*ball_r
+	local offset_y=cos(ang)*ball_r
+	add_particle(
+		x+offset_x,
+		y+offset_y,
+		0, -- dx
+		0, -- dy
+		3, -- type
+		15+rnd(15), -- add rnd so trail "trails off" at end
+		{14,2,13}, -- color_map
+		1+rnd(1) -- size
+	)
+end
+
+
 function shatter_brick(brick,last_dx,last_dy)
 	-- bump brick before it shatters
 	brick.offset_x=last_dx
 	brick.offset_y=last_dy
 	
-	shake_str+=0.05
+	if shake_str<0.4 then
+		shake_str+=0.05
+	end
 	sfx(14)
 
 	for x=0,brick_w/1.5 do
@@ -1275,7 +1342,7 @@ function animate_bricks()
 end
 
 
-function spawn_puff(x,y)
+function spawn_puffs(x,y)
 	for i=1,5 do
 		local ang=rnd() -- random angle
 		-- random pos/neg dx/dy
@@ -1290,6 +1357,120 @@ function spawn_puff(x,y)
 			15+rnd(15), -- max_age in frames
 			{9,4}, -- color_map
 			1+rnd(2) -- size
+		)
+	end
+end
+
+
+-- powerups
+-- 0 = slowdown
+-- 1 = life
+-- 2 = catch/sticky
+-- 3 = expand
+-- 4 = reduce
+-- 5 = megaball
+-- 6 = multiball
+function spawn_powerup_puffs(x,y,pill_type)
+	for i=1,20 do
+		local ang=rnd() -- random angle
+		-- random pos/neg dx/dy
+		local dx=sin(ang)*(1+rnd(2))
+		local dy=cos(ang)*(1+rnd(2))
+		-- determine puff color
+		local puff_clr_map
+		if pill_type==0 then
+			-- slowdown - orange
+			puff_clr_map={9,9,4,4,0}
+		elseif pill_type==1 then
+			-- life - white
+			puff_clr_map={7,7,6,5,0}
+		elseif pill_type==2 then
+			-- catch/sticky - green
+			puff_clr_map={11,11,3,3,0}
+		elseif pill_type==3 then
+			-- expand - blue
+			puff_clr_map={12,12,5,5,0}
+		elseif pill_type==4 then
+			-- reduce - black
+			puff_clr_map={0,0,5,5,6}
+		elseif pill_type==5 then
+			-- megaball - pink
+			puff_clr_map={14,14,2,2,0}
+		else -- multiball - red
+			puff_clr_map={8,8,2,2,0}
+		end
+		add_particle(
+			x,
+			y,
+			dx,
+			dy,
+			3, -- type
+			20+rnd(15), -- max_age in frames
+			puff_clr_map,
+			1+rnd(4) -- size
+		)
+	end
+end
+
+
+function spawn_death(x,y)
+	for i=1,30 do
+		local ang=rnd() -- random angle
+		-- random pos/neg dx/dy
+		local dx=sin(ang)*(2+rnd(4))
+		local dy=cos(ang)*(2+rnd(4))
+		local clr_map={10,10,10,9,4,0}
+		add_particle(
+			x,
+			y,
+			dx,
+			dy,
+			3, -- type
+			60+rnd(15), -- max_age in frames
+			clr_map,
+			3+rnd(5) -- size
+		)
+	end
+end
+
+
+function spawn_explosions(x,y)
+	sfx(15)
+	-- smoke
+	for i=1,20 do
+		local ang=rnd() -- random angle
+		-- random pos/neg dx/dy
+		local dx=sin(ang)*rnd(4)
+		local dy=cos(ang)*rnd(4)
+		local smoke_clr_map={0,0,5,5,6}
+		add_particle(
+			x,
+			y,
+			dx,
+			dy,
+			3, -- type
+			80+rnd(15), -- max_age in frames
+			smoke_clr_map,
+			3+rnd(6) -- size
+		)
+	end
+		
+		-- fireballs
+	for i=1,30 do
+		local ang=rnd() -- random angle
+		-- random pos/neg dx/dy
+		local dx=sin(ang)*(1+rnd(4))
+		local dy=cos(ang)*(1+rnd(4))
+		local fire_clr_map={7,10,9,8,5}
+		add_particle(
+			x,
+			y,
+			dx,
+			dy,
+			3, -- type
+			30+rnd(15), -- max_age in frames
+			fire_clr_map,
+			2+rnd(4) -- size
 		)
 	end
 end
@@ -1319,3 +1500,5 @@ __sfx__
 00040000203102332026330293402c350253001f30000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000400001b3701d3701f36021360233502535027340293402b3302d3302f320313203331035310000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000400002c6542864024630206251f7001d7000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000200003b673356730d673316612b6610d65227652226521c64615646126360e6360b62609627076270661704617036170361702617016170161700617000000000000000000000000000000000000000000000
+000400001b3701f36023350273402b3302f32027300293002b3002d3002f300313003330035300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
