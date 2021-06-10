@@ -1,13 +1,15 @@
 pico-8 cartridge // http://www.pico-8.com
 version 32
 __lua__
+-- init
+
 function _init()
  cls()
  
  mode="start"
  
  levels={}
- levels[1]="b9b/b9b"
+ levels[1]="b9b/b9b/b9b"
  levels[2]="bxbxbxbxb"
  level_num=1
  
@@ -38,6 +40,8 @@ function _init()
  debug=""
 end
 -->8
+-- update
+
 function _update60()
 	blink()
 	screenshake()
@@ -137,7 +141,7 @@ function update_game()
 			del(pills,pills[i])
 		end
 	end
-	rebound_bricks()
+	animate_bricks()
 end
 
 function update_ball(ball_idx)
@@ -163,11 +167,13 @@ function update_ball(ball_idx)
 	  next_x=mid(3,next_x,125) -- make sure ball never leaves screen
 	  b.dx=-b.dx
 	  sfx(0)
+	  spawn_puff(next_x,next_y)
 	 end
 	 if next_y < 9 then
 		 next_y=mid(9,next_y,127) -- make sure ball never leaves screen
 	  b.dy=-b.dy
 	  sfx(0)
+	  spawn_puff(next_x,next_y)
 	 end
 	
 	 -- check if ball will collide with pad
@@ -218,6 +224,7 @@ function update_ball(ball_idx)
 			
 			sfx(1)
 			chain=1
+			spawn_puff(next_x,next_y)
 			
 			-- catch/sticky powerup
 			if sticky and b.dy<0 then
@@ -698,7 +705,9 @@ function add_brick(loc,typ)
 	brick.type=typ
 	brick.flash=0 -- num frames to flash brick before disappearing
 	brick.offset_x=0
-	brick.offset_y=0
+	brick.offset_y=-(128+rnd(128))
+	brick.dx=0
+	brick.dy=rnd(64)
 	add(bricks,brick)
 end
 
@@ -808,6 +817,8 @@ function next_level()
  serve_ball()
 end
 -->8
+-- draw
+
 function _draw()
 	if mode=="game" then draw_game()
 	elseif mode=="start" then draw_start()
@@ -934,6 +945,8 @@ function hcenter(text)
  return 64-(#text*2)
 end
 -->8
+-- juicy-ness
+
 function screenshake()
 	-- random number between -16 and 16
 	local shake_x=16-rnd(32)
@@ -1028,7 +1041,7 @@ function fade_palette(prct)
 end
 
 
-function add_particle(x,y,dx,dy,typ,max_age,clr_array)
+function add_particle(x,y,dx,dy,typ,max_age,clr_array,size)
 	local p={}
 	p.x=x
 	p.y=y
@@ -1038,7 +1051,11 @@ function add_particle(x,y,dx,dy,typ,max_age,clr_array)
 	p.max_age=max_age -- in frames
 	p.age=0 -- in frames
 	p.clr_array=clr_array
-	p.clr=0
+	p.clr=0 -- sprite number if type=2
+	p.rot=0
+	p.rot_timer=0
+	p.size=size
+	p.orig_size=size
 	add(particles,p)
 end
 
@@ -1071,8 +1088,28 @@ function update_particles()
 				p.clr=p.clr_array[clr_idx]
 			end
 			-- apply gravity
-			if p.type==1 then
+			if p.type==1 or p.type==2 then
 				p.dy+=0.07
+			end
+			-- rotate chunk
+			if p.type==2 then
+				p.rot_timer+=1
+				if p.rot_timer%15==0 then
+					p.rot+=1
+					if p.rot>=4 then
+						p.rot=0
+					end
+				end
+			end
+			-- shrink
+			if p.type==3 then
+				local age_prct=1-(p.age/p.max_age) -- start at 100%
+				p.size=age_prct*p.orig_size
+			end
+			-- friction
+			if p.type==3 then
+				p.dx/=1.2
+				p.dy/=1.2
 			end
 			-- move particle
 			p.x+=p.dx
@@ -1083,18 +1120,36 @@ end
 
 
 -- particle types
--- 0 = ball
--- 1 = brick
+-- 0 = ball preview (static pixel)
+-- 1 = brick (single pixel)
+-- 2 = brick chunks (rotating sprite)
+-- 3 = puff of smoke
 function draw_particles()
 	local p
 	for i=1,#particles do
 		p=particles[i]
-		if p.type==0 then
+		if p.type==0 or p.type==1 then
 			-- ball particle
 			pset(p.x,p.y,p.clr)
-		elseif  p.type==1 then
-			-- brick particle
-			pset(p.x,p.y,p.clr)
+		elseif p.type==2 then
+			-- brick chunks
+			local flip_x,flip_y
+			if p.rot==2 then
+				flip_x=false
+				flip_y=true
+			elseif p.rot==3 then
+			 flip_x=true
+			 flip_y=true
+			elseif p.rot==4 then
+				flip_x=true
+				flip_y=false
+			else
+				flip_x=false
+				flip_y=false
+			end
+			spr(p.clr,p.x,p.y,1,1,flip_x,flip_y)
+		elseif p.type==3 then
+			circfill(p.x,p.y,p.size,p.clr)
 		end
 	end
 end
@@ -1114,7 +1169,8 @@ function spawn_ball_trail(x,y)
 			0, -- dy
 			0, -- type
 			8+rnd(15), -- add rnd so trail "trails off" at end
-			{10,9} -- color_map
+			{10,9}, -- color_map
+			0 -- size
 		)
 	end
 end
@@ -1122,8 +1178,11 @@ end
 
 function shatter_brick(brick,last_dx,last_dy)
 	-- bump brick before it shatters
-	brick.offset_x=last_dx*3
-	brick.offset_y=last_dy*3
+	brick.offset_x=last_dx
+	brick.offset_y=last_dy
+	
+	shake_str+=0.05
+	sfx(14)
 
 	for x=0,brick_w/1.5 do
 		for y=0,brick_h/1.5 do
@@ -1138,32 +1197,110 @@ function shatter_brick(brick,last_dx,last_dy)
 				dy,
 				1, -- type
 				80, -- max_age in frames
-				{7,6,5} -- color_map
+				{7,6,5}, -- color_map
+				0 -- size
+			)
+		end
+	end
+	-- add brick chunks
+	-- at least 3
+	local chunks=5+flr(rnd(3))
+	if chunks>0 then
+		for i=1,chunks do
+			local ang=rnd() -- random angle
+			-- random pos/neg dx/dy
+			local dx=sin(ang)*rnd(2)+(last_dx/2) -- randomize speed also
+			local dy=cos(ang)*rnd(2)+(last_dy/2) -- randomize speed also
+			-- random sprite (7-15)
+			local sprite_num=7+flr(rnd(8))
+			-- add chunk
+			add_particle(
+				brick.x,
+				brick.y,
+				dx,
+				dy,
+				2, -- type
+				80, -- max_age in frames
+				{sprite_num},
+				0 -- size
 			)
 		end
 	end
 end
 
 
-function rebound_bricks()
+function animate_bricks()
 	for i=1,#bricks do
 		local b=bricks[i]
 		if b.vis or b.flash>0 then
-			if b.offset_x~=0 or b.offset_y~=0 then
-				b.offset_x-=sign(b.offset_x)
-				b.offset_y-=sign(b.offset_y)
+			-- only animate if moving/offset
+			if b.offset_x~=0
+			or b.offset_y~=0
+			or b.dx~=0
+			or b.dy~=0
+			then
+				-- move brick based on speed
+				b.offset_x+=b.dx
+				b.offset_y+=b.dy
+	
+				-- update speed to return to normal position
+				b.dx-=b.offset_x/10
+				b.dy-=b.offset_y/10
+				
+				-- dampen speed closer to target location
+				if abs(b.dx)>b.offset_x then
+					b.dx/=1.3
+				end
+				if abs(b.dy)>b.offset_y then
+					b.dy/=1.3
+				end
+				
+				-- snap moving brick to final position
+				-- if barely moving
+				if abs(b.offset_x)<0.25
+				and abs(b.dx)<0.25
+				then
+					b.offset_x=0
+					b.dx=0
+				end
+				if abs(b.offset_y)<0.25
+				and abs(b.dy)<0.25
+				then
+					b.offset_y=0
+					b.dy=0
+				end
 			end
 		end
 	end
 end
 
+
+function spawn_puff(x,y)
+	for i=1,5 do
+		local ang=rnd() -- random angle
+		-- random pos/neg dx/dy
+		local dx=sin(ang)
+		local dy=cos(ang)
+		add_particle(
+			x,
+			y,
+			dx,
+			dy,
+			3, -- type
+			15+rnd(15), -- max_age in frames
+			{9,4}, -- color_map
+			1+rnd(2) -- size
+		)
+	end
+end
+
 __gfx__
 06777760067777600677776006777760f677777f0677776006777760000000000000000000000000000000000000000000000000000000000000000000000000
-559949955576777555b33bb555c1c1c55508800555e222e555828885000000000000000000000000000000000000000000000000000000000000000000000000
-559499955576777555b3bbb555cc1cc55508080555e222e555822885000000000000000000000000000000000000000000000000000000000000000000000000
-559949955576777555b3bbb555cc1cc55508800555e2e2e555828285000000000000000000000000000000000000000000000000000000000000000000000000
-559499955576677555b33bb555c1c1c55508080555e2e2e555822885000000000000000000000000000000000000000000000000000000000000000000000000
-059999500577775005bbbb5005cccc50f500005f05eeee5005888850000000000000000000000000000000000000000000000000000000000000000000000000
+559949955576777555b33bb555c1c1c55508800555e222e555828885000000000000000000000000000070000000000000007000000000000000000000000000
+559499955576777555b3bbb555cc1cc55508080555e222e555822885000000000007770000000770000777000000000000777000000000000000000000000000
+559949955576777555b3bbb555cc1cc55508800555e2e2e555828285000700000000770000000770000700000077700000077000000770000007700000770000
+559499955576677555b33bb555c1c1c55508080555e2e2e555822885007770000007700000007700000000000007770000000000000770000007700000070000
+059999500577775005bbbb5005cccc50f500005f05eeee5005888850007700000000000000007700000000000000000000000000007700000000000000000000
 00000000000000000000000000000000ffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000ffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __sfx__
@@ -1181,3 +1318,4 @@ __sfx__
 000200002036024360243502433033300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00040000203102332026330293402c350253001f30000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000400001b3701d3701f36021360233502535027340293402b3302d3302f320313203331035310000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000400002c6542864024630206251f7001d7000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
