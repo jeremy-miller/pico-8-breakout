@@ -4,13 +4,15 @@ __lua__
 -- init
 
 function _init()
+	cartdata("jeremy_breakout")
+
  cls()
  
  mode="start"
  
  levels={}
- --levels[1]="b9bb9bb9bb9b"
- levels[1]="e9e"
+ levels[1]="p9pb9bb9bb9beexxeexxee/p9p"
+ --levels[1]="e9e"
  levels[2]="bxbxbxbxb"
  level_num=1
  
@@ -37,6 +39,9 @@ function _init()
 	
 	last_hit_dx=0
 	last_hit_dy=0
+	
+	high_scores={}
+	load_high_scores()
  
  debug=""
 end
@@ -960,7 +965,8 @@ end
 function draw_start()
 	cls()
 	local text="breakout"
-	print(text,hcenter(text),40,7)
+	--print(text,hcenter(text),30,7)
+	draw_high_scores(0)
 	text="press ❎ to start"
 	print(text,hcenter(text),80,blink_grn)
 end
@@ -1437,7 +1443,7 @@ end
 function spawn_explosions(x,y)
 	sfx(15)
 	-- smoke
-	for i=1,20 do
+	for i=1,10 do
 		local ang=rnd() -- random angle
 		-- random pos/neg dx/dy
 		local dx=sin(ang)*rnd(4)
@@ -1451,12 +1457,12 @@ function spawn_explosions(x,y)
 			3, -- type
 			80+rnd(15), -- max_age in frames
 			smoke_clr_map,
-			3+rnd(6) -- size
+			2+rnd(3) -- size
 		)
 	end
 		
 		-- fireballs
-	for i=1,30 do
+	for i=1,20 do
 		local ang=rnd() -- random angle
 		-- random pos/neg dx/dy
 		local dx=sin(ang)*(1+rnd(4))
@@ -1470,8 +1476,49 @@ function spawn_explosions(x,y)
 			3, -- type
 			30+rnd(15), -- max_age in frames
 			fire_clr_map,
-			2+rnd(4) -- size
+			1+rnd(2) -- size
 		)
+	end
+end
+
+-->8
+-- high score
+
+function load_high_scores()
+	local slot=1
+	
+	-- check if high scores exist on system
+	if dget(0)==1 then
+		-- load existing high scores
+		for i=1,5 do
+			high_scores[i]=dget(slot)
+			slot+=1
+		end
+	else
+		-- create default high scores
+		high_scores={500,400,300,200,100}
+		save_high_scores()
+	end
+end
+
+
+function save_high_scores()
+	local slot=1
+	dset(0,1) -- indicate there are saved high scores saved
+	for i=1,5 do
+		dset(slot,high_scores[i])
+		slot+=1
+	end
+end
+
+
+function draw_high_scores(x)
+	for i=1,5 do
+		print(i.." -",x+32,10+7*i,7)
+		-- convert score to string to right align
+		local score=" "..high_scores[i]
+		-- right align score
+		print(score,(x+100)-(#score*4),10+7*i,7)
 	end
 end
 
